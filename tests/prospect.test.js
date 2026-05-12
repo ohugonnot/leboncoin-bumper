@@ -1,0 +1,168 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  scoreAd, ageDays, buildSearchPayload, buildEntry,
+  sortEntries, runProspectScan,
+  STRONG_SIGNALS, MODERATE_SIGNALS, NEG_SIGNALS, DEMAND_PREFIX
+} from '../prospect.js';
+import {
+  adWordpressMetz, adProgrammeurN8N, adCleaner,
+  adOldDeveloper, adShortTitle, adVagueButTechBody,
+  mockFetch
+} from './fixtures.js';
+
+// ─── scoreAd ──────────────────────────────────────────────────────────────
+
+test('scoreAd: strong title signal scores high', () => {
+  const s = scoreAd('Cherche un technicien web, CRM WordPress', '');
+  // STRONG title (+5) + DEMAND_PREFIX "Cherche" (+2) = 7
+  assert.equal(s, 7);
+});
+
+test('scoreAd: body-only strong signal still scores', () => {
+  const s = scoreAd('Demande aide projet professionnel',
+    'Je dois finir un site web avec PHP Symfony et un peu de Vue.js');
+  // body STRONG (+3) + title MODERATE no, "Demande" prefix (+2) = 5
+  assert.ok(s >= 5, `expected >=5, got ${s}`);
+});
+
+test('scoreAd: negative signal drops to 0 even with strong tech words', () => {
+  const s = scoreAd('Cherche femme de ménage pour site web', '');
+  assert.equal(s, 0);
+});
+
+test('scoreAd: too-short title returns 0', () => {
+  assert.equal(scoreAd('Aide', 'Demande aide pour mon site web wordpress.'), 0);
+});
+
+test('scoreAd: empty inputs return 0', () => {
+  assert.equal(scoreAd('', ''), 0);
+  assert.equal(scoreAd(null, null), 0);
+});
+
+test('scoreAd: moderate signal counts', () => {
+  const s = scoreAd('Recherche dépannage informatique sur Lyon', '');
+  // "informatique" is in STRONG via "aide informatique"? no — only matches MODERATE
+  // MODERATE title (+2) + DEMAND prefix (+2) = 4
+  assert.equal(s, 4);
+});
+
+// ─── ageDays ──────────────────────────────────────────────────────────────
+
+test('ageDays: parses leboncoin naive datetime', () => {
+  const now = new Date('2026-05-12T12:00:00Z');
+  const age = ageDays('2026-05-10 12:00:00', now);
+  assert.ok(Math.abs(age - 2) < 0.1, `expected ~2 days, got ${age}`);
+});
+
+test('ageDays: returns null on garbage', () => {
+  assert.equal(ageDays('not a date'), null);
+  assert.equal(ageDays(null), null);
+  assert.equal(ageDays(undefined), null);
+});
+
+// ─── buildSearchPayload ───────────────────────────────────────────────────
+
+test('buildSearchPayload: defaults', () => {
+  const p = buildSearchPayload({ keyword: 'wordpress' });
+  assert.deepEqual(p.filters, { enums: { ad_type: ['demand'] }, keywords: { text: 'wordpress' } });
+  assert.equal(p.limit, 100);
+  assert.equal(p.offset, 0);
+  assert.equal(p.sort_by, 'time');
+});
+
+test('buildSearchPayload: respects custom offset', () => {
+  const p = buildSearchPayload({ keyword: 'php', offset: 200, limit: 50 });
+  assert.equal(p.offset, 200);
+  assert.equal(p.limit, 50);
+});
+
+// ─── buildEntry ───────────────────────────────────────────────────────────
+
+test('buildEntry: extracts location + truncates body', () => {
+  const ad = { ...adWordpressMetz, body: 'x'.repeat(1500) };
+  const e = buildEntry(ad, { score: 8, kw: 'wordpress', isNew: true });
+  assert.equal(e.list_id, '3196483489');
+  assert.equal(e.location, 'Metz 57000');
+  assert.equal(e.body.length, 600);
+  assert.equal(e.score, 8);
+  assert.equal(e.is_new, true);
+});
+
+// ─── sortEntries ──────────────────────────────────────────────────────────
+
+test('sortEntries: new before seen, then by score', () => {
+  const sorted = sortEntries([
+    { list_id: 'a', score: 10, age_days: 5, is_new: false },
+    { list_id: 'b', score: 6, age_days: 1, is_new: true },
+    { list_id: 'c', score: 8, age_days: 3, is_new: true }
+  ]);
+  assert.deepEqual(sorted.map(e => e.list_id), ['c', 'b', 'a']);
+});
+
+// ─── runProspectScan (integration with mock fetch) ────────────────────────
+
+test('runProspectScan: filters by minScore, drops too-old, dedup by id', async () => {
+  const fetchFn = mockFetch({
+    wordpress: [adWordpressMetz, adVagueButTechBody, adCleaner, adShortTitle],
+    'aide site': [adWordpressMetz],          // duplicate of metz — must dedup
+    'site web': [adOldDeveloper],            // too old — must drop
+    développeur: [adProgrammeurN8N]
+  });
+  const out = await runProspectScan({
+    keywords: ['wordpress', 'aide site', 'site web', 'développeur'],
+    minScore: 5,
+    maxAgeDays: 30,
+    fetchFn
+  });
+  const ids = out.results.map(r => r.list_id);
+  assert.ok(ids.includes('3196483489'), 'WordPress Metz must appear');
+  assert.ok(ids.includes('3193981434'), 'N8N must appear');
+  assert.equal(ids.filter(i => i === '3196483489').length, 1, 'metz must be deduped');
+  assert.ok(!ids.includes('9000000001'), 'cleaner ad must be dropped');
+  assert.ok(!ids.includes('9000000002'), 'old ad must be dropped');
+  assert.ok(!ids.includes('9000000003'), 'short-title ad must be dropped');
+  assert.equal(out.scannedKeywords, 4);
+});
+
+test('runProspectScan: respects seenIds (is_new flag)', async () => {
+  const fetchFn = mockFetch({ wordpress: [adWordpressMetz, adVagueButTechBody] });
+  const seenIds = new Set(['3196483489']);
+  const out = await runProspectScan({ keywords: ['wordpress'], seenIds, fetchFn });
+  const metz = out.results.find(r => r.list_id === '3196483489');
+  const vague = out.results.find(r => r.list_id === '9000000004');
+  assert.equal(metz?.is_new, false);
+  assert.equal(vague?.is_new, true);
+});
+
+test('runProspectScan: empty keywords returns empty results', async () => {
+  const fetchFn = mockFetch({});
+  const out = await runProspectScan({ keywords: [], fetchFn });
+  assert.equal(out.total, 0);
+  assert.equal(out.scannedKeywords, 0);
+});
+
+// ─── Regex regression guards ──────────────────────────────────────────────
+
+test('regex: STRONG_SIGNALS does not match "vue" alone (used to false-positive)', () => {
+  assert.ok(!STRONG_SIGNALS.test('Cherche maison avec vue mer'));
+  assert.ok(STRONG_SIGNALS.test('Mission Vue.js + Laravel'));
+});
+
+test('regex: NEG_SIGNALS catches common non-tech demands', () => {
+  for (const t of [
+    'Recherche femme de ménage',
+    'Cherche cuisinier pour restaurant',
+    'Recherche colocation Lyon',
+    'Cherche garde enfant'
+  ]) {
+    assert.ok(NEG_SIGNALS.test(t), `should match: ${t}`);
+  }
+});
+
+test('regex: DEMAND_PREFIX catches request titles', () => {
+  for (const t of ['Cherche dev PHP', 'Recherche freelance', 'Besoin aide WordPress', 'Aide pour mon site']) {
+    assert.ok(DEMAND_PREFIX.test(t), `should match: ${t}`);
+  }
+  assert.ok(!DEMAND_PREFIX.test('Mon site est cassé'), 'no false positive');
+});

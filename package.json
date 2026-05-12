@@ -1,0 +1,19 @@
+{
+  "name": "leboncoin-bumper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension MV3 that auto-bumps your leboncoin listings and watches for relevant tech demands.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ohugonnot/leboncoin-bumper"
+  },
+  "license": "MIT",
+  "author": "Odilon Hugonnot <https://www.web-developpeur.com>"
+}

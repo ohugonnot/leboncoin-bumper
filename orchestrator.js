@@ -1,0 +1,382 @@
+// Drives a single tab through the weekly bump cycle: scrape → delete → repost.
+// Critical rule, learned during E2E mapping: NEVER navigate back in the deposit wizard
+// after a step has been submitted. Going back and re-submitting creates a duplicate listing.
+
+const LBC = 'https://www.leboncoin.fr';
+const LISTINGS_URL = `${LBC}/compte/part/mes-annonces`;
+const DEPOSIT_URL = `${LBC}/deposer-une-annonce`;
+
+export async function runCycle({ trigger }) {
+  const { settings } = await chrome.storage.local.get('settings');
+  await log(`▶ Cycle started (${trigger}). dryRun=${settings.dryRun}, onlyAdIds=${JSON.stringify(settings.onlyAdIds)}`);
+
+  let tab;
+  try {
+    tab = await chrome.tabs.create({ url: LISTINGS_URL, active: true });
+    await waitForTabLoad(tab.id);
+
+    const listings = await scrapeListings(tab.id);
+    await log(`Found ${listings.length} listing(s).`);
+
+    const targets = settings.onlyAdIds?.length
+      ? listings.filter(l => settings.onlyAdIds.includes(l.id))
+      : listings;
+
+    if (!targets.length) {
+      await log('No listings match the filter. Nothing to do.');
+      return { ok: true, processed: 0 };
+    }
+
+    for (const target of targets) {
+      await log(`— Listing ${target.id} ("${target.title.slice(0, 40)}", cat=${target.catSlug})`);
+      const data = await scrapeEditPage(tab.id, target.id);
+      data.catSlug = target.catSlug;
+      await log(`  scraped: ${data.photos.length} photos, ${data.body.length} body chars`);
+
+      if (settings.dryRun) {
+        await log('  [dry-run] would delete + repost. Skipping.');
+        continue;
+      }
+
+      await deleteListing(tab.id, target.id);
+      await log('  deleted.');
+
+      await repostListing(tab.id, data);
+      await log('  reposted (in moderation).');
+    }
+
+    await log(`✓ Cycle done. ${targets.length} processed.`);
+    return { ok: true, processed: targets.length };
+  } catch (err) {
+    await log(`✗ Cycle failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  } finally {
+    if (tab?.id) {
+      const { settings: s } = await chrome.storage.local.get('settings');
+      if (!s.dryRun) await chrome.tabs.remove(tab.id).catch(() => {});
+    }
+  }
+}
+
+// ---- Scrape ---------------------------------------------------------------
+
+async function scrapeListings(tabId) {
+  await navigate(tabId, LISTINGS_URL);
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      return [...document.querySelectorAll('li[data-qa-id="ad_item_container"]')].map(card => {
+        const link = card.querySelector('a[href*="/ad/"]');
+        const href = link?.getAttribute('href') || '';
+        const m = href.match(/^\/ad\/([^/]+)\/(\d+)$/);
+        return {
+          id: m?.[2],
+          catSlug: m?.[1] || null,
+          title: (link?.textContent || '').trim().replace(/(.+?)\1$/, '$1'),
+          href
+        };
+      }).filter(x => x.id);
+    }
+  });
+  return result;
+}
+
+async function scrapeEditPage(tabId, adId) {
+  await navigate(tabId, `${LBC}/annonce/${adId}/editer`);
+  await waitForSelector(tabId, 'input[name="subject"]');
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const get = (sel) => document.querySelector(sel)?.value || '';
+      return {
+        subject: get('input[name="subject"]'),
+        body: document.querySelector('textarea[name="body"]')?.value || '',
+        price: get('input[name="price"]'),
+        location: get('input[name="location"]'),
+        phoneHidden: document.querySelector('input[name="phone_hidden"]')?.checked || false,
+        photos: [...new Set(
+          [...document.querySelectorAll('img')]
+            .map(i => i.src)
+            .filter(s => s.includes('img.leboncoin.fr/api/v1/lbcpb1'))
+            .map(s => s.replace(/\?rule=[^&]+/, '?rule=ad-large'))
+        )]
+      };
+    }
+  });
+  return { adId, ...result };
+}
+
+// ---- Delete ---------------------------------------------------------------
+
+async function deleteListing(tabId, adId) {
+  await navigate(tabId, LISTINGS_URL);
+  await waitForSelector(tabId, 'li[data-qa-id="ad_item_container"]');
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    args: [adId],
+    func: (id) => {
+      const cards = [...document.querySelectorAll('li[data-qa-id="ad_item_container"]')];
+      const card = cards.find(c =>
+        c.querySelector('a[href*="/ad/"]')?.getAttribute('href')?.endsWith('/' + id)
+      );
+      if (!card) throw new Error('listing card not found: ' + id);
+      const del = [...card.querySelectorAll('a[title="Supprimer"]')]
+        .find(a => a.offsetParent !== null);
+      if (!del) throw new Error('delete link not visible on card ' + id);
+      del.click();
+    }
+  });
+
+  await waitForUrl(tabId, /\/compte\/mes-annonces\/suppression/);
+  await waitForSelector(tabId, 'button[data-qa-id="button-delete-confirm"]');
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      document.querySelector('button[data-qa-id="button-delete-confirm"]').click();
+    }
+  });
+
+  // Confirmation page shows "demande de suppression a bien été prise en compte"
+  await waitForText(tabId, 'a bien été prise en compte', 10000);
+}
+
+// ---- Repost (linear, never go back) ---------------------------------------
+
+async function repostListing(tabId, data) {
+  await navigate(tabId, DEPOSIT_URL);
+  await waitForSelector(tabId, 'input[name="subject"]');
+
+  // Step 1: title → category suggestions → pick by matching slug
+  await fillField(tabId, 'input[name="subject"]', data.subject);
+  await waitForSelector(tabId, 'input[type="radio"]', 8000).catch(() => {});
+  await sleep(800);
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    args: [data.catSlug],
+    func: (slug) => {
+      // The original category, e.g. "autres_services" → human "Autres services"
+      const wanted = (slug || '').replace(/_/g, ' ').toLowerCase();
+      const radios = [...document.querySelectorAll('input[type="radio"]')];
+      // Label format observed: "ServicesAutres services" (parent + sub joined). Match endsWith.
+      const match = radios.find(r => {
+        const lbl = (r.closest('label') || r.parentElement)?.textContent?.trim().toLowerCase() || '';
+        return lbl.endsWith(wanted);
+      });
+      if (match) { match.click(); return; }
+      // Fallback: open the manual dropdown and pick. Not implemented yet — log and fail.
+      throw new Error('category radio not matched for slug=' + slug + '. Manual category selection required.');
+    }
+  });
+  await sleep(400);
+  await clickContinue(tabId);
+
+  // Step 2: photos. Wait for the file input then push the photos via fetch+DataTransfer.
+  await waitForSelector(tabId, 'input[type="file"]');
+  await uploadPhotos(tabId, data.photos);
+  await sleep(800);
+  await clickContinue(tabId);
+
+  // Step 3: title + description. Title is pre-filled from step 1, fill the description.
+  await waitForSelector(tabId, 'textarea[name="body"]');
+  await fillField(tabId, 'textarea[name="body"]', data.body);
+  await sleep(200);
+  await clickContinue(tabId);
+
+  // Step 4: price.
+  await waitForSelector(tabId, 'input[name="price"]');
+  await fillField(tabId, 'input[name="price"]', data.price || '0');
+  await sleep(200);
+  await clickContinue(tabId);
+
+  // Step 5: location autocomplete. Type, wait for dropdown, click matching item.
+  await waitForSelector(tabId, 'input[name="location"]');
+  await fillField(tabId, 'input[name="location"]', data.location);
+  await sleep(1200);
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    args: [data.location],
+    func: (loc) => {
+      const want = (loc || '').trim().toLowerCase();
+      const items = [...document.querySelectorAll('li, button, [role="option"]')]
+        .filter(el => el.offsetParent !== null);
+      const exact = items.find(el => (el.textContent || '').trim().toLowerCase() === want);
+      const target = exact || items.find(el => (el.textContent || '').toLowerCase().includes(want));
+      if (!target) throw new Error('location suggestion not found for: ' + loc);
+      target.click();
+    }
+  });
+  await sleep(300);
+  await clickContinue(tabId);
+
+  // Step 6: coordinates (email/phone are pre-filled). Set phone_hidden to match original.
+  await waitForSelector(tabId, 'input[name="phone_hidden"]');
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    args: [data.phoneHidden],
+    func: (hidden) => {
+      const cb = document.querySelector('input[name="phone_hidden"]');
+      if (!cb) return;
+      if (cb.checked !== hidden) cb.click();
+    }
+  });
+  await sleep(200);
+  await clickContinue(tabId);
+
+  // Step 7: boost upsell page (/options). Pick the free "Déposer sans booster".
+  await waitForUrl(tabId, /\/options/);
+  await sleep(800);
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const btn = [...document.querySelectorAll('button, a')]
+        .find(b => /sans booster|gratuitement|d[ée]poser sans/i.test(b.textContent || ''));
+      if (!btn) throw new Error('"Déposer sans booster" button not found');
+      btn.click();
+    }
+  });
+
+  await waitForUrl(tabId, /\/confirmation/);
+  await waitForText(tabId, 'bien reçu votre annonce', 15000);
+}
+
+async function uploadPhotos(tabId, photoUrls) {
+  if (!photoUrls?.length) return;
+  // Fetch in the SW context (host_permissions cover img.leboncoin.fr), pass base64 to the page.
+  const payload = [];
+  for (const url of photoUrls) {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`photo fetch failed (${resp.status}): ${url}`);
+    const buf = new Uint8Array(await resp.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+    payload.push({ b64: btoa(bin), type: resp.headers.get('content-type') || 'image/jpeg' });
+  }
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    args: [payload],
+    func: (items) => {
+      const input = document.querySelector('input[type="file"]');
+      if (!input) throw new Error('file input not found on photos step');
+      const files = items.map((it, i) => {
+        const bin = atob(it.b64);
+        const buf = new Uint8Array(bin.length);
+        for (let j = 0; j < bin.length; j++) buf[j] = bin.charCodeAt(j);
+        const ext = (it.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+        return new File([buf], `photo-${i + 1}.${ext}`, { type: it.type });
+      });
+      const dt = new DataTransfer();
+      for (const f of files) dt.items.add(f);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+}
+
+// ---- Helpers --------------------------------------------------------------
+
+async function navigate(tabId, url) {
+  await chrome.tabs.update(tabId, { url });
+  await waitForTabLoad(tabId);
+}
+
+function waitForTabLoad(tabId, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    const t0 = Date.now();
+    const onUpdated = (id, info) => {
+      if (id === tabId && info.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        clearInterval(timer);
+        setTimeout(resolve, 1200);
+      }
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    const timer = setInterval(() => {
+      if (Date.now() - t0 > timeoutMs) {
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        clearInterval(timer);
+        reject(new Error('tab load timeout'));
+      }
+    }, 500);
+  });
+}
+
+async function waitForSelector(tabId, selector, timeoutMs = 10000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId }, args: [selector],
+      func: (sel) => !!document.querySelector(sel)
+    });
+    if (result) return;
+    await sleep(250);
+  }
+  throw new Error('selector timeout: ' + selector);
+}
+
+async function waitForText(tabId, text, timeoutMs = 10000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId }, args: [text],
+      func: (t) => document.body.textContent.includes(t)
+    });
+    if (result) return;
+    await sleep(300);
+  }
+  throw new Error('text timeout: ' + text);
+}
+
+async function waitForUrl(tabId, regex, timeoutMs = 15000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    const t = await chrome.tabs.get(tabId);
+    if (regex.test(t.url || '')) {
+      await sleep(800);
+      return;
+    }
+    await sleep(250);
+  }
+  throw new Error('url timeout: ' + regex);
+}
+
+async function fillField(tabId, selector, value) {
+  await chrome.scripting.executeScript({
+    target: { tabId }, args: [selector, value],
+    func: (sel, val) => {
+      const el = document.querySelector(sel);
+      if (!el) throw new Error('field not found: ' + sel);
+      // Use the native setter so React state updates correctly.
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+      setter.call(el, val);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+}
+
+async function clickContinue(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const btn = [...document.querySelectorAll('button')]
+        .find(b => /^continuer$/i.test((b.textContent || '').trim()));
+      if (!btn) throw new Error('Continuer button not found');
+      btn.click();
+    }
+  });
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+async function log(message) {
+  const ts = new Date().toISOString();
+  const { log: existing = [] } = await chrome.storage.local.get('log');
+  await chrome.storage.local.set({ log: [...existing, { ts, message }].slice(-200) });
+  console.log('[lbc-bumper]', ts, message);
+}

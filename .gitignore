@@ -1,0 +1,27 @@
+# Personal/private data — never commit
+backups/
+*.private.json
+.env
+.env.*
+
+# Generated artifacts
+*.crx
+*.zip
+*.pem
+dist/
+build/
+node_modules/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
+
+# Test/playwright runtime artifacts that may leak data
+.playwright-mcp/
+test-results/
+playwright-report/
+coverage/
