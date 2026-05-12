@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Leboncoin Bumper</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+  <header>
+    <h1><span class="dot"></span>Leboncoin Tools</h1>
+    <span class="meta" id="header-meta"></span>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="bumper">↻ Bumper</button>
+    <button class="tab" data-tab="prospect">🎯 Prospects</button>
+  </nav>
+
+  <!-- BUMPER PANEL ────────────────────────────────────────────── -->
+  <section class="panel active" data-panel="bumper">
+    <div class="section">
+      <h2 class="section-title">Planning</h2>
+      <label class="toggle">
+        <input type="checkbox" id="b-enabled">
+        <span class="label">Activé</span>
+        <span class="hint">supprime + repose toutes les semaines</span>
+      </label>
+      <div style="height: 6px"></div>
+      <label class="toggle">
+        <input type="checkbox" id="b-dryRun">
+        <span class="label">Dry-run</span>
+        <span class="hint">simule, ne supprime rien</span>
+      </label>
+    </div>
+
+    <div class="section">
+      <div class="row">
+        <div class="field">
+          <label>Jour</label>
+          <select id="b-dayOfWeek">
+            <option value="0">Dim</option>
+            <option value="1">Lun</option>
+            <option value="2">Mar</option>
+            <option value="3">Mer</option>
+            <option value="4">Jeu</option>
+            <option value="5">Ven</option>
+            <option value="6">Sam</option>
+          </select>
+        </div>
+        <div class="field"><label>Heure</label><input type="number" id="b-hour" min="0" max="23"></div>
+        <div class="field"><label>Min</label><input type="number" id="b-minute" min="0" max="59"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="field">
+        <label>Restreindre aux IDs (vide = toutes les annonces)</label>
+        <input type="text" id="b-onlyAdIds" placeholder="3150436839, 3063330490, …">
+      </div>
+    </div>
+
+    <div class="row">
+      <button class="btn primary" id="b-runNow">Lancer maintenant</button>
+      <button class="btn ghost" id="b-clearLog">Vider le log</button>
+    </div>
+
+    <hr>
+    <h2 class="section-title">Log</h2>
+    <div class="log" id="b-log"></div>
+  </section>
+
+  <!-- PROSPECT PANEL ──────────────────────────────────────────── -->
+  <section class="panel" data-panel="prospect">
+    <div class="prospect-meta">
+      <div class="stat"><span class="n" id="p-stat-new">–</span><span class="l">Nouveaux</span></div>
+      <div class="stat"><span class="n" id="p-stat-total">–</span><span class="l">Total &lt;30j</span></div>
+      <div class="last-run" id="p-last-run">Jamais scanné</div>
+    </div>
+
+    <div class="row" style="margin-bottom: 10px;">
+      <button class="btn primary" id="p-scan">Scanner maintenant</button>
+      <button class="btn secondary" id="p-mark-seen">Marquer toutes comme vues</button>
+    </div>
+
+    <div class="prospect-list" id="p-list"></div>
+
+    <hr>
+    <h2 class="section-title">Planning veille</h2>
+    <label class="toggle">
+      <input type="checkbox" id="p-enabled">
+      <span class="label">Veille hebdo activée</span>
+    </label>
+    <div style="height: 8px"></div>
+    <div class="row">
+      <div class="field">
+        <label>Jour</label>
+        <select id="p-dayOfWeek">
+          <option value="0">Dim</option><option value="1">Lun</option>
+          <option value="2">Mar</option><option value="3">Mer</option>
+          <option value="4">Jeu</option><option value="5">Ven</option>
+          <option value="6">Sam</option>
+        </select>
+      </div>
+      <div class="field"><label>Heure</label><input type="number" id="p-hour" min="0" max="23"></div>
+      <div class="field"><label>Score min</label><input type="number" id="p-minScore" min="1" max="20"></div>
+      <div class="field"><label>Âge max (j)</label><input type="number" id="p-maxAgeDays" min="1" max="90"></div>
+    </div>
+
+    <div class="field" style="margin-top: 8px;">
+      <label>Mots-clés (un par ligne)</label>
+      <textarea id="p-keywords" rows="4" style="resize: vertical; min-height: 60px;"></textarea>
+    </div>
+  </section>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
