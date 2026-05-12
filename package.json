@@ -2,7 +2,7 @@
   "name": "leboncoin-bumper",
   "version": "0.1.0",
   "private": true,
-  "description": "Chrome extension MV3 that auto-bumps your leboncoin listings and watches for relevant tech demands.",
+  "description": "Extension Chrome MV3 — republie automatiquement tes annonces leboncoin et scrute les demandes tech qui matchent ton profil.",
   "type": "module",
   "scripts": {
     "test": "node --test tests/"
