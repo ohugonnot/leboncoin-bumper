@@ -13,6 +13,7 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+[hidden] { display: none !important; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
   width: 540px;
@@ -20,6 +21,16 @@ body {
   color: var(--ink);
   font-size: 13px;
 }
+
+/* Fullpage mode: when the popup is opened in a tab (?fullpage=1) */
+body.fullpage {
+  width: min(1000px, 95vw);
+  margin: 0 auto;
+  min-height: 100vh;
+}
+body.fullpage .log { height: 260px; }
+body.fullpage .prospect-list { max-height: 70vh; }
+body.fullpage .listings { max-height: 60vh; }
 
 header {
   display: flex; align-items: center; justify-content: space-between;
@@ -36,6 +47,37 @@ header h1 .dot {
   background: var(--orange); box-shadow: 0 0 0 3px var(--orange-soft);
 }
 header .meta { font-size: 11px; color: var(--ink-soft); }
+.header-actions { display: flex; align-items: center; gap: 8px; }
+.icon-btn {
+  border: 1px solid var(--border); background: var(--bg);
+  width: 26px; height: 26px; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; color: var(--ink-soft); font-size: 13px;
+  transition: all .15s;
+}
+.icon-btn:hover { color: var(--orange); border-color: var(--orange); }
+.icon-btn.small { width: 22px; height: 22px; font-size: 11px; }
+
+/* Banners (login state, errors, …) */
+.banner {
+  display: flex; align-items: center; gap: 10px;
+  margin: 10px 14px 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  border: 1px solid;
+}
+.banner.warning {
+  background: #fff5e6; border-color: #f5c98a; color: #8a5a00;
+}
+.banner.success {
+  background: #e8f5ed; border-color: #b6dcc4; color: #1a5b34;
+  padding: 7px 12px;
+}
+.banner .banner-icon { font-size: 16px; }
+.banner .banner-content { flex: 1; line-height: 1.35; }
+.banner .banner-content p { margin: 2px 0 0; font-size: 11px; color: inherit; opacity: 0.85; }
+.banner .btn { padding: 5px 10px; font-size: 11.5px; }
 
 .tabs {
   display: flex; gap: 0; background: var(--bg);
@@ -205,3 +247,108 @@ header .meta { font-size: 11px; color: var(--ink-soft); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 hr { border: 0; border-top: 1px solid var(--border); margin: 10px 0; }
+
+/* Big primary CTA used in the bumper action bar */
+.btn.big { padding: 10px 16px; font-size: 13px; }
+.btn.small { padding: 5px 9px; font-size: 11.5px; }
+.btn.primary.small { padding: 6px 10px; }
+
+/* Action bar = main CTA + a small inline toggle (mode test) */
+.action-bar {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 10px;
+}
+.action-bar > .btn.big { flex: 1; }
+
+.toggle.inline {
+  padding: 6px 10px; border-radius: 6px;
+  background: var(--bg); border: 1px solid var(--border);
+  font-size: 12px; cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+  white-space: nowrap;
+}
+
+.section-hint.center { text-align: center; }
+.muted { color: var(--ink-soft); font-weight: 400; }
+
+/* Collapsible <details> styling */
+details.section > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+details.section > summary::-webkit-details-marker { display: none; }
+details.section > summary h2.section-title {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin: 0;
+  padding: 4px 0;
+}
+details.section > summary h2.section-title::before {
+  content: '▸';
+  font-size: 9px;
+  color: var(--ink-soft);
+  transition: transform .15s;
+}
+details.section[open] > summary h2.section-title::before {
+  transform: rotate(90deg);
+}
+
+/* Listings picker (Bumper tab) */
+.section-title-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 4px;
+}
+.section-hint { font-size: 11px; color: var(--ink-soft); margin: 0 0 8px; }
+
+.listings {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 280px; overflow-y: auto;
+  padding-right: 4px;
+}
+.listings::-webkit-scrollbar { width: 8px; }
+.listings::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.listings::-webkit-scrollbar-thumb:hover { background: var(--ink-soft); }
+.listings .empty {
+  text-align: center; padding: 16px; color: var(--ink-soft);
+  font-style: italic; font-size: 12px;
+}
+
+.listing {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.listing:hover { border-color: var(--orange); }
+.listing.checked { background: var(--orange-soft); border-color: var(--orange); }
+.listing input[type="checkbox"] { margin: 0; flex-shrink: 0; }
+.listing img {
+  width: 40px; height: 40px; border-radius: 4px;
+  object-fit: cover; background: var(--bg-soft);
+  flex-shrink: 0;
+}
+.listing .listing-body {
+  flex: 1; min-width: 0;
+}
+.listing .listing-title {
+  font-weight: 500; font-size: 12.5px; line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.listing .listing-meta {
+  font-size: 10.5px; color: var(--ink-soft); margin-top: 2px;
+  display: flex; gap: 8px; align-items: center;
+}
+.listing .status-badge {
+  display: inline-block; padding: 1px 5px; border-radius: 8px;
+  font-size: 9.5px; font-weight: 600;
+  background: var(--bg-soft); color: var(--ink-soft);
+}
+.listing .status-badge.online { background: #d8f4e3; color: var(--green); }
+.listing .status-badge.pending { background: #fff3d6; color: #8a5a00; }
+.listing .listing-id { font-family: ui-monospace, monospace; font-size: 10px; opacity: 0.6; }
+.listing.paused { opacity: 0.55; cursor: not-allowed; }
+.listing.paused:hover { border-color: var(--border); }
+.listing.paused input[type="checkbox"] { cursor: not-allowed; }

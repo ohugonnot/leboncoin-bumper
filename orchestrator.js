@@ -18,13 +18,21 @@ export async function runCycle({ trigger }) {
     const listings = await scrapeListings(tab.id);
     await log(`Found ${listings.length} listing(s).`);
 
-    const targets = settings.onlyAdIds?.length
+    let targets = settings.onlyAdIds?.length
       ? listings.filter(l => settings.onlyAdIds.includes(l.id))
       : listings;
 
+    // Paused listings can't be edited via /editer (leboncoin returns an error page).
+    // They have to be reactivated by the user first.
+    const paused = targets.filter(l => /pause/i.test(l.status || ''));
+    if (paused.length) {
+      await log(`⚠ ${paused.length} annonce(s) en pause ignorée(s) (à réactiver sur leboncoin avant bump) : ${paused.map(p => p.id).join(', ')}`);
+      targets = targets.filter(l => !/pause/i.test(l.status || ''));
+    }
+
     if (!targets.length) {
-      await log('No listings match the filter. Nothing to do.');
-      return { ok: true, processed: 0 };
+      await log('Aucune annonce à traiter. Rien à faire.');
+      return { ok: true, processed: 0, skipped: paused.length };
     }
 
     for (const target of targets) {
@@ -60,25 +68,90 @@ export async function runCycle({ trigger }) {
 
 // ---- Scrape ---------------------------------------------------------------
 
+/**
+ * Scrape the listings on the given tab. The tab MUST already be on /mes-annonces
+ * and fully loaded — the caller is responsible for navigation + waiting.
+ */
 async function scrapeListings(tabId) {
-  await navigate(tabId, LISTINGS_URL);
+  // Make sure cards have actually rendered (SPA hydration can lag past status=complete)
+  await waitForSelector(tabId, 'li[data-qa-id="ad_item_container"]', 10000).catch(() => {});
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId },
     func: () => {
+      // Leboncoin renders the title twice (mobile + desktop spans) and the second
+      // copy may be truncated. Detect by fingerprinting the first 30 chars and
+      // looking for their second occurrence in the string.
+      const dedupHalf = (s) => {
+        s = (s || '').trim().replace(/\s+/g, ' ');
+        if (s.length < 20) return s;
+        const probeLen = Math.min(30, Math.floor(s.length / 3));
+        const probe = s.slice(0, probeLen);
+        const second = s.indexOf(probe, probeLen);
+        return second > 0 ? s.slice(0, second).trim() : s;
+      };
       return [...document.querySelectorAll('li[data-qa-id="ad_item_container"]')].map(card => {
         const link = card.querySelector('a[href*="/ad/"]');
         const href = link?.getAttribute('href') || '';
         const m = href.match(/^\/ad\/([^/]+)\/(\d+)$/);
-        return {
-          id: m?.[2],
-          catSlug: m?.[1] || null,
-          title: (link?.textContent || '').trim().replace(/(.+?)\1$/, '$1'),
-          href
-        };
+        // First leboncoin thumbnail (preview-thumbnail rule, ~300px wide)
+        const img = card.querySelector('img')?.src || null;
+        const title = dedupHalf(link?.textContent || '');
+        // Status badge (En ligne / En cours de vérification / etc.)
+        const statusText = card.textContent.match(/En cours de v[ée]rification|En ligne|Expir[ée]e|En pause/i)?.[0] || null;
+        return { id: m?.[2], catSlug: m?.[1] || null, title, href, thumbnail: img, status: statusText };
       }).filter(x => x.id);
     }
   });
   return result;
+}
+
+/**
+ * Standalone helper: open a background tab on /mes-annonces, scrape the list,
+ * close the tab. Used by the popup's listings picker.
+ *
+ * @returns {Promise<{listings: object[], fetchedAt: string}>}
+ */
+export async function listUserAds() {
+  const tab = await chrome.tabs.create({ url: LISTINGS_URL, active: false });
+  try {
+    await waitForTabLoad(tab.id);
+    const listings = await scrapeListings(tab.id);
+    return { listings, fetchedAt: new Date().toISOString() };
+  } finally {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+/**
+ * Cheap check: are we logged into leboncoin in this Chrome profile?
+ *
+ * Strategy: fetch /compte/part/mes-annonces with redirect:'manual'.
+ * - 200 → real page rendered → logged in.
+ * - opaqueredirect/3xx → redirected to login → not logged in.
+ *
+ * Tries to extract the username from the homepage as a bonus.
+ *
+ * @returns {Promise<{loggedIn: boolean, pseudo?: string}>}
+ */
+export async function checkLoginStatus() {
+  try {
+    const res = await fetch('https://www.leboncoin.fr/compte/part/mes-annonces', {
+      credentials: 'include', redirect: 'manual'
+    });
+    if (res.status !== 200 || res.type !== 'basic') return { loggedIn: false };
+    // Try to grab pseudo from the homepage HTML (cheap, no extra call cost if cached)
+    let pseudo = null;
+    try {
+      const homeRes = await fetch('https://www.leboncoin.fr/', { credentials: 'include' });
+      const html = await homeRes.text();
+      pseudo = html.match(/"pseudo"\s*:\s*"([^"]+)"/)?.[1]
+            || html.match(/account\/private\/home"[^>]*>([^<]{2,30})</)?.[1]?.trim()
+            || null;
+    } catch { /* non-fatal */ }
+    return { loggedIn: true, pseudo };
+  } catch {
+    return { loggedIn: false };
+  }
 }
 
 async function scrapeEditPage(tabId, adId) {
@@ -283,13 +356,21 @@ async function navigate(tabId, url) {
 }
 
 function waitForTabLoad(tabId, timeoutMs = 20000) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
+    // Tab might already be loaded by the time we attach the listener.
+    try {
+      const t = await chrome.tabs.get(tabId);
+      if (t.status === 'complete') {
+        setTimeout(resolve, 800);
+        return;
+      }
+    } catch { /* tab gone */ }
     const t0 = Date.now();
     const onUpdated = (id, info) => {
       if (id === tabId && info.status === 'complete') {
         chrome.tabs.onUpdated.removeListener(onUpdated);
         clearInterval(timer);
-        setTimeout(resolve, 1200);
+        setTimeout(resolve, 800);
       }
     };
     chrome.tabs.onUpdated.addListener(onUpdated);

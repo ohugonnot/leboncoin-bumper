@@ -27,9 +27,11 @@ Cette extension le fait pour toi, sur un planning hebdomadaire, **100 % local, s
 - **Récupère tes annonces actives** (titre, description, prix, localité, photos)
 - **Les supprime** via le formulaire de confirmation leboncoin
 - **Les republie à l'identique** via le wizard de dépôt (catégorie auto-matchée, photos ré-uploadées, préférence "numéro masqué" préservée)
+- **Sélecteur visuel** : tu coches les annonces à bumper directement dans la liste (avec miniatures + badges de statut)
+- **Annonces "en pause" détectées et ignorées** (elles ne sont pas éditables tant qu'elles ne sont pas réactivées)
 - **Planning hebdomadaire** via `chrome.alarms`
-- **Mode dry-run** pour prévisualiser sans rien toucher
-- **Filtre par IDs d'annonces** pour tester sur un sous-ensemble d'abord
+- **Mode test** pour prévisualiser sans rien supprimer ni republier
+- **Confirmation explicite** avant chaque bump en mode réel
 
 ### 🎯 Prospect Watch
 
@@ -65,13 +67,14 @@ Assure-toi d'être **connecté à leboncoin.fr** dans le même profil Chrome ava
 ### Bumper
 
 <p align="center">
-  <img src="docs/screenshots/bumper.png" width="480" alt="Onglet Bumper — planning + dry-run + filtre par ID + log temps réel">
+  <img src="docs/screenshots/bumper.png" width="480" alt="Onglet Bumper — sélecteur visuel d'annonces + Mode test + planning">
 </p>
 
 1. Ouvre le popup, onglet **↻ Bumper**.
-2. **Laisse "Dry-run" coché** pour le premier essai. Tu peux mettre un seul ID d'annonce dans **"Restreindre aux IDs"** pour tester sur une annonce précise.
-3. Clique **Lancer maintenant**. Surveille le log — tu devrais voir `Found N listing(s).` puis `scraped: …` puis `[dry-run] would delete + repost.`
-4. Si le dry-run a l'air bon, **décoche Dry-run**, coche **Activé**, choisis Jour/Heure, laisse le champ IDs vide (= bump toutes les annonces). Le prochain bump aura lieu à l'heure choisie et se répétera tous les 7 jours.
+2. Clique **⟳ Charger** pour récupérer la liste de tes annonces depuis leboncoin.
+3. **Coche** les annonces à bumper (aucune cochée = toutes seront traitées). Les annonces "en pause" apparaissent grisées et ne peuvent pas être bumpées tant qu'elles ne sont pas réactivées.
+4. **Laisse "Mode test" coché** pour ton premier essai. Clique **↻ Tester (mode simulation)** — l'extension scrape mais ne supprime ni ne reposte rien. Suis le journal technique (replié par défaut).
+5. Si la simulation est OK, **décoche Mode test**, clique **↻ Republier maintenant**, confirme dans le popup. Ouvre **📅 Planifier** pour activer le bump automatique chaque semaine au jour/heure de ton choix.
 
 ### Prospect Watch
 
@@ -94,7 +97,7 @@ Tout l'état vit dans `chrome.storage.local`. Le popup expose :
 | Bumper | `enabled` | Lance le cycle de bump à l'heure planifiée |
 | Bumper | `dryRun` | Scrape uniquement ; ne supprime / republie jamais |
 | Bumper | `dayOfWeek`/`hour`/`minute` | Quand déclencher |
-| Bumper | `onlyAdIds` | Liste blanche d'IDs ; vide = toutes les annonces |
+| Bumper | `onlyAdIds` | Liste blanche d'IDs (alimentée par les checkbox du popup) ; vide = toutes les annonces |
 | Prospects | `enabled` | Lance le scan à l'heure planifiée |
 | Prospects | `dayOfWeek`/`hour` | Quand déclencher |
 | Prospects | `minScore` | Élimine les annonces sous ce score (défaut : 5) |
@@ -142,7 +145,10 @@ Ce projet n'est **pas affilié à leboncoin.fr**. Il est fourni "tel quel" sous 
 
 ## Roadmap
 
-- [ ] Sélecteur visuel pour "Restreindre aux IDs" (liste des annonces avec checkboxes)
+- [x] Sélecteur visuel pour "Restreindre aux IDs" (liste des annonces avec checkboxes + miniatures + badges)
+- [x] Détection des annonces "en pause" (non bumpables)
+- [x] Bouton "Ouvrir dans un onglet" pour vue plein écran
+- [x] Indicateur de connexion leboncoin dans le popup
 - [ ] Statut par annonce (✓ buméée / ⏸ skipped / ✗ failed) dans un dashboard
 - [ ] Historique persistant des derniers cycles
 - [ ] Micro-randomisation optionnelle des horaires de repost pour un aspect plus naturel

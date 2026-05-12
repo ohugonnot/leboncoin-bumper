@@ -2,7 +2,7 @@
 //   - lbc-weekly-bump: deletes & reposts the user's own listings.
 //   - lbc-weekly-prospect: scans leboncoin demands matching the user's tech profile.
 
-import { runCycle } from './orchestrator.js';
+import { runCycle, listUserAds, checkLoginStatus } from './orchestrator.js';
 import { runProspectScan, markResultsSeen, DEFAULT_KEYWORDS } from './prospect.js';
 
 const BUMP_ALARM = 'lbc-weekly-bump';
@@ -68,6 +68,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     } else if (msg.type === 'MARK_PROSPECTS_SEEN') {
       await markResultsSeen(msg.results || []);
       sendResponse({ ok: true });
+    } else if (msg.type === 'CHECK_LOGIN') {
+      sendResponse({ ok: true, result: await checkLoginStatus() });
+    } else if (msg.type === 'REFRESH_LISTINGS') {
+      try {
+        const out = await listUserAds();
+        await chrome.storage.local.set({ myListings: out });
+        sendResponse({ ok: true, result: out });
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
     }
   })();
   return true;
