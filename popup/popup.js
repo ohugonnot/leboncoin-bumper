@@ -1,4 +1,13 @@
-// ---- Tab switching --------------------------------------------------------
+// ─── Fullpage mode (when opened in a regular tab) ──────────────────────────
+const fullpage = new URLSearchParams(location.search).get('fullpage') === '1';
+if (fullpage) document.body.classList.add('fullpage');
+
+document.getElementById('open-in-tab').addEventListener('click', () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html?fullpage=1') });
+  window.close();
+});
+
+// ─── Tab switching ─────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(btn => {
   btn.addEventListener('click', () => {
     const target = btn.dataset.tab;
@@ -7,29 +16,68 @@ document.querySelectorAll('.tab').forEach(btn => {
   });
 });
 
-// ---- Bumper panel ---------------------------------------------------------
+// ─── Login state ───────────────────────────────────────────────────────────
+async function checkLogin() {
+  const warn = document.getElementById('login-banner');
+  const ok = document.getElementById('login-ok-banner');
+  const pseudoEl = document.getElementById('login-pseudo');
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'CHECK_LOGIN' });
+    if (r?.result?.loggedIn) {
+      warn.hidden = true;
+      ok.hidden = false;
+      pseudoEl.textContent = r.result.pseudo ? `· ${r.result.pseudo}` : '';
+    } else {
+      warn.hidden = false;
+      ok.hidden = true;
+    }
+  } catch {
+    warn.hidden = false;
+    ok.hidden = true;
+  }
+}
+
+// ─── Bumper panel ──────────────────────────────────────────────────────────
 const b = {
   enabled: document.getElementById('b-enabled'),
   dryRun: document.getElementById('b-dryRun'),
   dayOfWeek: document.getElementById('b-dayOfWeek'),
   hour: document.getElementById('b-hour'),
   minute: document.getElementById('b-minute'),
-  onlyAdIds: document.getElementById('b-onlyAdIds'),
   runNow: document.getElementById('b-runNow'),
   clearLog: document.getElementById('b-clearLog'),
-  log: document.getElementById('b-log')
+  log: document.getElementById('b-log'),
+  listings: document.getElementById('b-listings'),
+  refreshListings: document.getElementById('b-refresh-listings'),
+  listingsHint: document.getElementById('b-listings-hint')
 };
 
 async function loadBumper() {
-  const { settings = {}, log = [] } = await chrome.storage.local.get(['settings', 'log']);
+  const { settings = {}, log = [], myListings } = await chrome.storage.local.get(['settings', 'log', 'myListings']);
   b.enabled.checked = !!settings.enabled;
   b.dryRun.checked = settings.dryRun !== false;
   b.dayOfWeek.value = settings.dayOfWeek ?? 1;
   b.hour.value = settings.hour ?? 9;
   b.minute.value = settings.minute ?? 0;
-  b.onlyAdIds.value = (settings.onlyAdIds || []).join(', ');
   renderLog(log);
+  renderListings(myListings, new Set(settings.onlyAdIds || []));
+  updateActionHint();
 }
+
+function updateActionHint() {
+  const hint = document.getElementById('b-action-hint');
+  const runBtn = document.getElementById('b-runNow');
+  if (b.dryRun.checked) {
+    hint.innerHTML = '✓ <strong>Mode test actif</strong> : on simule, rien n\'est supprimé ni reposté.';
+    hint.style.color = 'var(--green)';
+    runBtn.textContent = '↻ Tester (mode simulation)';
+  } else {
+    hint.innerHTML = '⚠️ <strong>Mode réel</strong> : tes annonces seront supprimées puis republiées.';
+    hint.style.color = 'var(--red)';
+    runBtn.textContent = '↻ Republier maintenant';
+  }
+}
+
 function renderLog(entries) {
   b.log.innerHTML = '';
   for (const e of entries) {
@@ -40,39 +88,146 @@ function renderLog(entries) {
   }
   b.log.scrollTop = b.log.scrollHeight;
 }
+
+function renderListings(stored, selectedIds) {
+  b.listings.innerHTML = '';
+  if (!stored?.listings?.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = stored?.fetchedAt
+      ? 'Aucune annonce trouvée. Es-tu connecté à leboncoin ?'
+      : 'Clique ⟳ Charger pour récupérer tes annonces.';
+    b.listings.appendChild(empty);
+    b.listingsHint.textContent = '';
+    return;
+  }
+  const total = stored.listings.length;
+  const selected = stored.listings.filter(l => selectedIds.has(l.id)).length;
+  const when = stored.fetchedAt ? new Date(stored.fetchedAt) : null;
+  const ago = when ? timeAgo(when) : '';
+  b.listingsHint.innerHTML = selected === 0
+    ? `${total} annonces · <em>aucune cochée = toutes seront bumpées</em>${ago ? ` · MAJ ${ago}` : ''}`
+    : `<strong>${selected} / ${total}</strong> annonces sélectionnées${ago ? ` · MAJ ${ago}` : ''}`;
+
+  for (const it of stored.listings) {
+    const isPaused = /pause/i.test(it.status || '');
+    const row = document.createElement('label');
+    row.className = 'listing'
+      + (selectedIds.has(it.id) ? ' checked' : '')
+      + (isPaused ? ' paused' : '');
+    if (isPaused) row.title = "Cette annonce est en pause sur leboncoin — réactive-la avant qu'elle puisse être bumpée.";
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = selectedIds.has(it.id);
+    cb.disabled = isPaused;
+    cb.addEventListener('change', async () => {
+      const { settings = {} } = await chrome.storage.local.get('settings');
+      const ids = new Set(settings.onlyAdIds || []);
+      if (cb.checked) ids.add(it.id); else ids.delete(it.id);
+      const next = { ...settings, onlyAdIds: [...ids] };
+      await chrome.storage.local.set({ settings: next });
+      await chrome.runtime.sendMessage({ type: 'RESCHEDULE' });
+      row.classList.toggle('checked', cb.checked);
+      renderListings(stored, ids);
+    });
+    row.appendChild(cb);
+    if (it.thumbnail) {
+      const img = document.createElement('img');
+      img.src = it.thumbnail; img.alt = '';
+      row.appendChild(img);
+    }
+    const body = document.createElement('div');
+    body.className = 'listing-body';
+    body.innerHTML = `
+      <div class="listing-title" title="${escapeAttr(it.title)}">${escapeHtml(it.title || '(sans titre)')}</div>
+      <div class="listing-meta">
+        ${it.status ? `<span class="status-badge ${classifyStatus(it.status)}">${escapeHtml(it.status)}</span>` : ''}
+        <span class="listing-id">${escapeHtml(it.id)}</span>
+        ${it.catSlug ? `<span>· ${escapeHtml(it.catSlug)}</span>` : ''}
+      </div>
+    `;
+    row.appendChild(body);
+    b.listings.appendChild(row);
+  }
+}
+
+function classifyStatus(s) {
+  if (/en ligne/i.test(s)) return 'online';
+  if (/v[ée]rification/i.test(s)) return 'pending';
+  return '';
+}
+
+function timeAgo(date) {
+  const sec = Math.round((Date.now() - date.getTime()) / 1000);
+  if (sec < 60) return 'à l\'instant';
+  if (sec < 3600) return `il y a ${Math.round(sec/60)} min`;
+  if (sec < 86400) return `il y a ${Math.round(sec/3600)} h`;
+  return `il y a ${Math.round(sec/86400)} j`;
+}
+
 async function saveBumper() {
-  const settings = {
+  const { settings = {} } = await chrome.storage.local.get('settings');
+  const next = {
+    ...settings,
     enabled: b.enabled.checked,
     dryRun: b.dryRun.checked,
     dayOfWeek: +b.dayOfWeek.value,
     hour: +b.hour.value,
-    minute: +b.minute.value,
-    onlyAdIds: b.onlyAdIds.value.split(',').map(s => s.trim()).filter(Boolean)
+    minute: +b.minute.value
   };
-  await chrome.storage.local.set({ settings });
+  await chrome.storage.local.set({ settings: next });
   await chrome.runtime.sendMessage({ type: 'RESCHEDULE' });
 }
-[b.enabled, b.dryRun, b.dayOfWeek, b.hour, b.minute, b.onlyAdIds].forEach(el => {
-  el.addEventListener('change', saveBumper);
+
+[b.enabled, b.dryRun, b.dayOfWeek, b.hour, b.minute].forEach(el => {
+  el.addEventListener('change', () => { saveBumper(); updateActionHint(); });
   el.addEventListener('blur', saveBumper);
 });
+
 b.runNow.addEventListener('click', async () => {
+  if (!b.dryRun.checked) {
+    const ok = confirm(
+      "⚠️ Mode réel\n\n" +
+      "Tes annonces vont être supprimées puis republiées sur leboncoin.\n" +
+      "Cette action est irréversible (nouvel ID, perte de l'historique).\n\n" +
+      "Continuer ?"
+    );
+    if (!ok) return;
+  }
   b.runNow.disabled = true;
   b.runNow.innerHTML = '<span class="spinner-inline"></span>En cours…';
   try { await chrome.runtime.sendMessage({ type: 'RUN_NOW' }); }
   finally {
     b.runNow.disabled = false;
-    b.runNow.textContent = 'Lancer maintenant';
+    updateActionHint();
     const { log = [] } = await chrome.storage.local.get('log');
     renderLog(log);
   }
 });
+
 b.clearLog.addEventListener('click', async () => {
   await chrome.storage.local.set({ log: [] });
   renderLog([]);
 });
 
-// ---- Prospect panel -------------------------------------------------------
+b.refreshListings.addEventListener('click', async () => {
+  b.refreshListings.disabled = true;
+  b.refreshListings.innerHTML = '<span class="spinner-inline"></span>';
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'REFRESH_LISTINGS' });
+    if (!r?.ok) {
+      b.listingsHint.textContent = `Erreur : ${r?.error || 'inconnue'}`;
+      return;
+    }
+    const { settings = {} } = await chrome.storage.local.get('settings');
+    renderListings(r.result, new Set(settings.onlyAdIds || []));
+  } finally {
+    b.refreshListings.disabled = false;
+    b.refreshListings.innerHTML = '⟳ Charger';
+  }
+});
+
+// ─── Prospect panel ────────────────────────────────────────────────────────
 const p = {
   enabled: document.getElementById('p-enabled'),
   dayOfWeek: document.getElementById('p-dayOfWeek'),
@@ -169,7 +324,7 @@ p.markSeen.addEventListener('click', async () => {
   await loadProspect();
 });
 
-// ---- Helpers --------------------------------------------------------------
+// ─── Helpers ───────────────────────────────────────────────────────────────
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -182,7 +337,11 @@ chrome.storage.onChanged.addListener((changes) => {
   if (changes.prospectResults || changes.prospectLastRun || changes.prospectSeenIds) {
     loadProspect();
   }
+  if (changes.myListings || changes.settings) {
+    loadBumper();
+  }
 });
 
+checkLogin();
 loadBumper();
 loadProspect();

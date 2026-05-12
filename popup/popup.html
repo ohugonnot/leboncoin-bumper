@@ -9,8 +9,26 @@
 
   <header>
     <h1><span class="dot"></span>Leboncoin Tools</h1>
-    <span class="meta" id="header-meta"></span>
+    <div class="header-actions">
+      <button class="icon-btn" id="open-in-tab" title="Ouvrir dans un onglet (plus grand)">⤢</button>
+    </div>
   </header>
+
+  <!-- Login banners (mutually exclusive) -->
+  <div class="banner warning" id="login-banner" hidden>
+    <span class="banner-icon">⚠️</span>
+    <div class="banner-content">
+      <strong>Pas connecté à leboncoin</strong>
+      <p>Connecte-toi à leboncoin.fr d'abord — l'extension a besoin d'une session active.</p>
+    </div>
+    <a class="btn primary small" href="https://www.leboncoin.fr/" target="_blank" rel="noopener">Se connecter</a>
+  </div>
+  <div class="banner success" id="login-ok-banner" hidden>
+    <span class="banner-icon">✓</span>
+    <div class="banner-content">
+      <strong>Connecté <span id="login-pseudo"></span></strong>
+    </div>
+  </div>
 
   <nav class="tabs">
     <button class="tab active" data-tab="bumper">↻ Bumper</button>
@@ -19,55 +37,65 @@
 
   <!-- BUMPER PANEL ────────────────────────────────────────────── -->
   <section class="panel active" data-panel="bumper">
+
+    <!-- 1. ANNONCES (la chose principale qu'on regarde) -->
     <div class="section">
-      <h2 class="section-title">Planning</h2>
-      <label class="toggle">
-        <input type="checkbox" id="b-enabled">
-        <span class="label">Activé</span>
-        <span class="hint">supprime + repose toutes les semaines</span>
-      </label>
-      <div style="height: 6px"></div>
-      <label class="toggle">
-        <input type="checkbox" id="b-dryRun">
-        <span class="label">Dry-run</span>
-        <span class="hint">simule, ne supprime rien</span>
-      </label>
+      <div class="section-title-row">
+        <h2 class="section-title">Mes annonces</h2>
+        <button class="btn ghost small" id="b-refresh-listings" title="Recharger depuis leboncoin">⟳ Charger</button>
+      </div>
+      <p class="section-hint" id="b-listings-hint">Charge la liste de tes annonces depuis leboncoin pour les sélectionner.</p>
+      <div class="listings" id="b-listings"></div>
     </div>
 
-    <div class="section">
-      <div class="row">
+    <!-- 2. ACTION PRINCIPALE -->
+    <div class="action-bar">
+      <button class="btn primary big" id="b-runNow">↻ Republier maintenant</button>
+      <label class="toggle inline" title="Si coché, l'extension simule mais ne supprime ni ne reposte rien.">
+        <input type="checkbox" id="b-dryRun" checked>
+        <span class="label">Mode test</span>
+      </label>
+    </div>
+    <p class="section-hint center" id="b-action-hint">En mode test, rien n'est supprimé. Décoche pour passer en mode réel.</p>
+
+    <hr>
+
+    <!-- 3. PLANNING (réglages secondaires) -->
+    <details class="section" id="b-planning-section">
+      <summary><h2 class="section-title">📅 Planifier (optionnel)</h2></summary>
+      <label class="toggle">
+        <input type="checkbox" id="b-enabled">
+        <span class="label">Republier automatiquement</span>
+        <span class="hint">une fois par semaine</span>
+      </label>
+      <div class="row" style="margin-top: 6px;">
         <div class="field">
           <label>Jour</label>
           <select id="b-dayOfWeek">
-            <option value="0">Dim</option>
-            <option value="1">Lun</option>
-            <option value="2">Mar</option>
-            <option value="3">Mer</option>
-            <option value="4">Jeu</option>
-            <option value="5">Ven</option>
-            <option value="6">Sam</option>
+            <option value="0">Dimanche</option>
+            <option value="1">Lundi</option>
+            <option value="2">Mardi</option>
+            <option value="3">Mercredi</option>
+            <option value="4">Jeudi</option>
+            <option value="5">Vendredi</option>
+            <option value="6">Samedi</option>
           </select>
         </div>
         <div class="field"><label>Heure</label><input type="number" id="b-hour" min="0" max="23"></div>
         <div class="field"><label>Min</label><input type="number" id="b-minute" min="0" max="59"></div>
       </div>
-    </div>
-
-    <div class="section">
-      <div class="field">
-        <label>Restreindre aux IDs (vide = toutes les annonces)</label>
-        <input type="text" id="b-onlyAdIds" placeholder="3150436839, 3063330490, …">
-      </div>
-    </div>
-
-    <div class="row">
-      <button class="btn primary" id="b-runNow">Lancer maintenant</button>
-      <button class="btn ghost" id="b-clearLog">Vider le log</button>
-    </div>
+    </details>
 
     <hr>
-    <h2 class="section-title">Log</h2>
-    <div class="log" id="b-log"></div>
+
+    <!-- 4. LOG (replié par défaut, devs only) -->
+    <details class="section" id="b-log-section">
+      <summary><h2 class="section-title">🪵 Journal technique</h2></summary>
+      <div class="log" id="b-log"></div>
+      <div style="text-align: right; margin-top: 6px;">
+        <button class="btn ghost small" id="b-clearLog">Effacer</button>
+      </div>
+    </details>
   </section>
 
   <!-- PROSPECT PANEL ──────────────────────────────────────────── -->
@@ -79,38 +107,46 @@
     </div>
 
     <div class="row" style="margin-bottom: 10px;">
-      <button class="btn primary" id="p-scan">Scanner maintenant</button>
-      <button class="btn secondary" id="p-mark-seen">Marquer toutes comme vues</button>
+      <button class="btn primary" id="p-scan">🔍 Scanner maintenant</button>
+      <button class="btn secondary" id="p-mark-seen">✓ Tout marquer vu</button>
     </div>
+
+    <p class="section-hint" id="p-empty-hint">
+      Le scan interroge l'API leboncoin sur tes mots-clés (par défaut&nbsp;: profils dev/web/IA/automatisation).
+      Premier scan : ~30 à 60 secondes.
+    </p>
 
     <div class="prospect-list" id="p-list"></div>
 
     <hr>
-    <h2 class="section-title">Planning veille</h2>
-    <label class="toggle">
-      <input type="checkbox" id="p-enabled">
-      <span class="label">Veille hebdo activée</span>
-    </label>
-    <div style="height: 8px"></div>
-    <div class="row">
-      <div class="field">
-        <label>Jour</label>
-        <select id="p-dayOfWeek">
-          <option value="0">Dim</option><option value="1">Lun</option>
-          <option value="2">Mar</option><option value="3">Mer</option>
-          <option value="4">Jeu</option><option value="5">Ven</option>
-          <option value="6">Sam</option>
-        </select>
-      </div>
-      <div class="field"><label>Heure</label><input type="number" id="p-hour" min="0" max="23"></div>
-      <div class="field"><label>Score min</label><input type="number" id="p-minScore" min="1" max="20"></div>
-      <div class="field"><label>Âge max (j)</label><input type="number" id="p-maxAgeDays" min="1" max="90"></div>
-    </div>
 
-    <div class="field" style="margin-top: 8px;">
-      <label>Mots-clés (un par ligne)</label>
-      <textarea id="p-keywords" rows="4" style="resize: vertical; min-height: 60px;"></textarea>
-    </div>
+    <details class="section">
+      <summary><h2 class="section-title">⚙️ Réglages veille</h2></summary>
+
+      <label class="toggle">
+        <input type="checkbox" id="p-enabled">
+        <span class="label">Scan automatique chaque semaine</span>
+      </label>
+      <div class="row" style="margin-top: 6px;">
+        <div class="field">
+          <label>Jour</label>
+          <select id="p-dayOfWeek">
+            <option value="0">Dim</option><option value="1">Lun</option>
+            <option value="2">Mar</option><option value="3">Mer</option>
+            <option value="4">Jeu</option><option value="5">Ven</option>
+            <option value="6">Sam</option>
+          </select>
+        </div>
+        <div class="field"><label>Heure</label><input type="number" id="p-hour" min="0" max="23"></div>
+        <div class="field" title="Plus haut = moins de résultats mais plus pertinents (défaut 5)"><label>Score min</label><input type="number" id="p-minScore" min="1" max="20"></div>
+        <div class="field"><label>Âge max (j)</label><input type="number" id="p-maxAgeDays" min="1" max="90"></div>
+      </div>
+
+      <div class="field" style="margin-top: 10px;">
+        <label>Mots-clés <span class="muted">(un par ligne)</span></label>
+        <textarea id="p-keywords" rows="6" style="resize: vertical; min-height: 90px;"></textarea>
+      </div>
+    </details>
   </section>
 
   <script type="module" src="popup.js"></script>
