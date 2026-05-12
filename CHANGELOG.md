@@ -1,16 +1,15 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+Toutes les modifications notables sont listées ici.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Format basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce projet suit le [Versioning Sémantique](https://semver.org/lang/fr/).
 
 ## [0.1.0] — 2026-05-12
 
-### Added
-- Initial public release.
-- **Bumper**: weekly cycle that scrapes every active listing, deletes it, and reposts it identically (title, body, price, location, photos, phone-hidden preference).
-- **Prospect Watch**: weekly scan of leboncoin demands using `/finder/search`, with a regex-based scoring engine and a `seenIds` dedup index.
-- Popup UI with two tabs (Bumper / Prospects), persistent settings in `chrome.storage.local`.
-- Node-only test suite covering the scoring logic, dedup behaviour, and regex regressions.
-- MIT license + ToS disclaimer.
+### Ajouté
+- Release publique initiale.
+- **Bumper** : cycle hebdomadaire qui scrape chaque annonce active, la supprime, puis la republie à l'identique (titre, description, prix, localité, photos, préférence numéro masqué).
+- **Prospect Watch** : scan hebdomadaire des demandes leboncoin via `/finder/search`, avec moteur de scoring regex et index `seenIds`.
+- UI popup avec deux onglets (Bumper / Prospects), réglages persistés dans `chrome.storage.local`.
+- Suite de tests Node-only couvrant la logique de scoring, le dédoublonnage et les régressions regex.
+- Licence MIT + disclaimer CGU.

@@ -1,151 +1,176 @@
 # Leboncoin Bumper
 
-> Chrome MV3 extension that **auto-bumps your leboncoin listings** every week and **watches for tech demands** matching your skills.
+> Extension Chrome (Manifest V3) qui **republie automatiquement tes annonces leboncoin** chaque semaine et **scrute les demandes tech** correspondant à tes compétences.
 
 <p align="center">
-  <img src="docs/screenshots/prospect-hero.png" width="480" alt="Prospect Watch screen — fresh demands matching your skills, scored and deduplicated">
+  <img src="docs/screenshots/prospect-hero.png" width="480" alt="Onglet Prospect Watch — demandes tech récentes, scorées et dédupliquées">
 </p>
 
 [![Tests](https://img.shields.io/badge/tests-18%20passing-success)](#tests)
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 [![Manifest](https://img.shields.io/badge/Chrome-MV3-orange)](manifest.json)
 
-## Why
+🇬🇧 **English version** below ([#english](#english))
 
-If you sell or offer services on leboncoin.fr, your listings sink in search results after a few days. The only free way to come back to the top is to **delete and repost**. Doing it manually for 5–10 listings every week is annoying.
+---
 
-This extension does it for you, on a weekly schedule, fully local, no third-party service. As a bonus, it also scans leboncoin for **fresh tech-related demands** you might want to answer (developer, WordPress help, automation, retrogaming…).
+## Pourquoi
 
-## Features
+Sur leboncoin, tes annonces coulent dans les résultats de recherche au bout de quelques jours. Le seul moyen gratuit de remonter en haut, c'est de **supprimer puis republier**. À la main, sur 5–10 annonces chaque semaine, c'est pénible.
+
+Cette extension le fait pour toi, sur un planning hebdomadaire, **100 % local, sans service tiers**. En bonus, elle scrute aussi leboncoin pour repérer les **demandes tech récentes** auxquelles tu pourrais répondre (recherche de développeur, aide WordPress, automatisation, retrogaming…).
+
+## Fonctionnalités
 
 ### ↻ Bumper
-- **Scrapes your active listings** (title, body, price, location, photos)
-- **Deletes them** via leboncoin's own confirmation flow
-- **Reposts them identically** via the deposit wizard (category auto-matched, photos re-uploaded, phone-hidden preference preserved)
-- **Weekly schedule** via `chrome.alarms`
-- **Dry-run mode** to preview without acting
-- **Filter by listing IDs** to test on a subset first
+
+- **Récupère tes annonces actives** (titre, description, prix, localité, photos)
+- **Les supprime** via le formulaire de confirmation leboncoin
+- **Les republie à l'identique** via le wizard de dépôt (catégorie auto-matchée, photos ré-uploadées, préférence "numéro masqué" préservée)
+- **Planning hebdomadaire** via `chrome.alarms`
+- **Mode dry-run** pour prévisualiser sans rien toucher
+- **Filtre par IDs d'annonces** pour tester sur un sous-ensemble d'abord
 
 ### 🎯 Prospect Watch
-- Hits leboncoin's **`/finder/search` API** directly (one POST per keyword)
-- **62 default tech keywords** tuned for a French full-stack dev profile, fully editable
-- **Scoring engine** with strong/moderate/negative regex signals — drops jardiniers/ménages/colocations, keeps WordPress/Symfony/N8N/IA missions
-- **`<30 days` freshness filter**
-- **Dedup with `seenIds`** — once you've reviewed an ad, it stays in the list but loses the orange `NEW` badge
-- **Weekly schedule** independent of the bumper
-- **Click-through** to the leboncoin ad in a new tab
 
-## Install
+- Appelle directement l'**API `/finder/search`** de leboncoin (un POST par mot-clé)
+- **62 mots-clés tech par défaut** taillés pour un profil full-stack français, entièrement éditables
+- **Moteur de scoring** avec regex de signaux forts/modérés/négatifs — élimine jardiniers, ménages, colocations ; garde WordPress, Symfony, N8N, IA…
+- **Filtre fraîcheur `<30 jours`**
+- **Dédoublonnage avec `seenIds`** — une fois une annonce vue, elle reste dans la liste mais perd le badge orange `NEW`
+- **Planning hebdomadaire** indépendant du bumper
+- **Click-through** pour ouvrir l'annonce dans un nouvel onglet
 
-> The extension is not on the Chrome Web Store. Install it as an unpacked extension.
+## Installation
+
+> L'extension n'est pas sur le Chrome Web Store. Installe-la en mode développeur.
 
 ```bash
 git clone https://github.com/ohugonnot/leboncoin-bumper.git
 ```
 
-1. Open `chrome://extensions` in Chrome.
-2. Toggle **Developer mode** in the top-right.
-3. Click **Load unpacked** and select the cloned `leboncoin-bumper/` folder.
-4. Pin the orange icon to your toolbar.
+1. Ouvre `chrome://extensions` dans Chrome
+2. Active le **Mode développeur** (interrupteur en haut à droite)
+3. Clique **Charger l'extension non empaquetée** et sélectionne le dossier `leboncoin-bumper/`
+4. Épingle l'icône orange à ta barre d'outils
 
 <p align="center">
-  <img src="docs/screenshots/install-extensions-page.png" width="640" alt="chrome://extensions page after install">
+  <img src="docs/screenshots/install-extensions-page.png" width="640" alt="Page chrome://extensions après installation">
 </p>
 
-Make sure you are **logged into leboncoin.fr** in the same Chrome profile before using the bumper.
+Assure-toi d'être **connecté à leboncoin.fr** dans le même profil Chrome avant d'utiliser le bumper.
 
-## Usage
+## Utilisation
 
 ### Bumper
 
 <p align="center">
-  <img src="docs/screenshots/bumper.png" width="480" alt="Bumper tab — schedule + dry-run + per-ID filter + live log">
+  <img src="docs/screenshots/bumper.png" width="480" alt="Onglet Bumper — planning + dry-run + filtre par ID + log temps réel">
 </p>
 
-1. Open the popup, **Bumper** tab.
-2. Keep **Dry-run** checked for the first run. Optionally enter one of your real listing IDs in **Restreindre aux IDs** to test on a single ad.
-3. Click **Lancer maintenant**. Watch the log — you should see `Found N listings.` then `scraped: …` and `[dry-run] would delete + repost.`
-4. If the dry-run looks right, uncheck **Dry-run**, check **Activé**, set a Day/Hour, leave the IDs field empty (= bump everything). The next bump happens at the chosen time and then every 7 days.
+1. Ouvre le popup, onglet **↻ Bumper**.
+2. **Laisse "Dry-run" coché** pour le premier essai. Tu peux mettre un seul ID d'annonce dans **"Restreindre aux IDs"** pour tester sur une annonce précise.
+3. Clique **Lancer maintenant**. Surveille le log — tu devrais voir `Found N listing(s).` puis `scraped: …` puis `[dry-run] would delete + repost.`
+4. Si le dry-run a l'air bon, **décoche Dry-run**, coche **Activé**, choisis Jour/Heure, laisse le champ IDs vide (= bump toutes les annonces). Le prochain bump aura lieu à l'heure choisie et se répétera tous les 7 jours.
 
 ### Prospect Watch
 
-1. Open the popup, **🎯 Prospects** tab.
-2. Click **Scanner maintenant**. ~30–60 s for 62 keywords.
-3. Read the cards (most relevant first). Click any title to open the ad in a new tab.
-4. Click **Marquer toutes comme vues** once you've processed them — next scan only highlights what's truly new.
-5. Optionally enable **Veille hebdo activée** to run the scan automatically every week.
+1. Ouvre le popup, onglet **🎯 Prospects**.
+2. Clique **Scanner maintenant**. ~30–60 s pour 62 mots-clés.
+3. Lis les cards (les plus pertinentes en premier). Clique sur un titre pour ouvrir l'annonce dans un nouvel onglet.
+4. Clique **Marquer toutes comme vues** une fois que tu as traité les résultats — le scan suivant ne mettra en avant que ce qui est vraiment nouveau.
+5. Active **Veille hebdo activée** si tu veux que le scan tourne tout seul chaque semaine.
 
-### Customizing the keywords
+### Personnaliser les mots-clés
 
-The default keyword list is tuned for a French full-stack dev. Edit the textarea in the **Prospects** tab (one keyword per line) to match your own niche.
+La liste par défaut est calibrée pour un dev full-stack français. Édite le textarea dans l'onglet **Prospects** (un mot-clé par ligne) pour matcher ta niche.
 
-## Configuration reference
+## Configuration
 
-All state lives in `chrome.storage.local`. The popup exposes:
+Tout l'état vit dans `chrome.storage.local`. Le popup expose :
 
-| Tab | Setting | Effect |
+| Onglet | Réglage | Effet |
 |---|---|---|
-| Bumper | `enabled` | Run the bump cycle on schedule |
-| Bumper | `dryRun` | Scrape only; never delete or repost |
-| Bumper | `dayOfWeek`/`hour`/`minute` | When to fire |
-| Bumper | `onlyAdIds` | Comma-separated allow-list; empty = all listings |
-| Prospects | `enabled` | Run the scan on schedule |
-| Prospects | `dayOfWeek`/`hour` | When to fire |
-| Prospects | `minScore` | Drop ads scored below (default 5) |
-| Prospects | `maxAgeDays` | Drop ads older than (default 30) |
-| Prospects | `keywords` | One keyword per line |
+| Bumper | `enabled` | Lance le cycle de bump à l'heure planifiée |
+| Bumper | `dryRun` | Scrape uniquement ; ne supprime / republie jamais |
+| Bumper | `dayOfWeek`/`hour`/`minute` | Quand déclencher |
+| Bumper | `onlyAdIds` | Liste blanche d'IDs ; vide = toutes les annonces |
+| Prospects | `enabled` | Lance le scan à l'heure planifiée |
+| Prospects | `dayOfWeek`/`hour` | Quand déclencher |
+| Prospects | `minScore` | Élimine les annonces sous ce score (défaut : 5) |
+| Prospects | `maxAgeDays` | Élimine les annonces plus vieilles que (défaut : 30) |
+| Prospects | `keywords` | Un mot-clé par ligne |
 
-## How it works
+## Comment ça marche
 
 ```
 ┌────────────────┐    ┌──────────────────┐    ┌─────────────────────┐
 │ chrome.alarms  │───►│  background.js   │───►│  orchestrator.js    │
-│ (weekly)       │    │  (service worker)│    │  scrape → delete →  │
-└────────────────┘    └──────────────────┘    │  repost via tab     │
+│ (hebdomadaire) │    │  (service worker)│    │  scrape → delete →  │
+└────────────────┘    └──────────────────┘    │  repost (via onglet)│
                               │                └─────────────────────┘
                               │                ┌─────────────────────┐
                               └───────────────►│  prospect.js        │
-                                               │  /finder/search API │
-                                               │  score + dedup      │
+                                               │  API /finder/search │
+                                               │  scoring + dédup    │
                                                └─────────────────────┘
 ```
 
-- **Bumper** (`orchestrator.js`) drives a real Chrome tab through the leboncoin UI. It mirrors what you'd click yourself: card → "Supprimer" → `button-delete-confirm` → deposit wizard. All selectors are reverse-engineered from the live DOM.
-- **Prospect Watch** (`prospect.js`) calls the same API leboncoin's own frontend uses (`POST https://api.leboncoin.fr/finder/search`) with `ad_type=demand`. The `api_key` is the public web-client key visible in every browser request.
+- Le **Bumper** (`orchestrator.js`) pilote un vrai onglet Chrome à travers l'interface leboncoin. Il reproduit ce que tu cliquerais toi-même : carte → bouton "Supprimer" → `button-delete-confirm` → wizard de dépôt. Tous les sélecteurs sont reverse-engineerés depuis le DOM live.
+- **Prospect Watch** (`prospect.js`) appelle la même API que le front leboncoin utilise (`POST https://api.leboncoin.fr/finder/search`) avec `ad_type=demand`. L'`api_key` est la clé publique du client web visible dans toutes les requêtes navigateur.
 
 ## Tests
 
-Pure scoring/dedup logic is covered by Node's built-in test runner — no extra deps.
+La logique pure (scoring + dédoublonnage) est couverte par le test runner Node natif — pas de dépendance.
 
 ```bash
 npm test
-# or
+# ou
 node --test tests/
 ```
 
-18 tests, ~120 ms. Coverage includes regex regressions (e.g. "vue" alone must not match the JS framework signal), seenIds behavior, age filtering, and dedup across keywords.
+18 tests, ~120 ms. Couvre les régressions regex (ex : "vue" tout court ne doit pas matcher le framework JS), le comportement `seenIds`, le filtre d'âge, et le dédoublonnage à travers les mots-clés.
 
-## Limitations & disclaimer
+## ⚠️ Limitations & avertissement
 
-- **leboncoin's Terms of Service forbid automated actions.** Using this extension may get your account flagged or suspended. Use a throwaway account first if you are risk-averse.
-- The bumper depends on leboncoin's HTML/DOM. When they redesign, selectors break. Open an issue or send a PR — fixes are typically 5-line locator updates.
-- The first deposit wizard step occasionally shows an extra "Type" (Offre/Demande) screen depending on the auto-detected category. The orchestrator skips it when not present.
-- DataDome (leboncoin's anti-bot) is fine with low-volume usage in a real user session. Don't crank the schedule below daily.
+- **Les CGU de leboncoin interdisent l'automatisation** (art. 8 — usage de robot, script…). Utiliser cette extension peut faire flagger ou suspendre ton compte. Si tu es prudent·e, teste d'abord sur un compte secondaire.
+- Le bumper dépend du DOM/HTML de leboncoin. Quand ils redesignent une page, des sélecteurs cassent. Ouvre une issue ou envoie une PR — les correctifs sont typiquement 5 lignes de locator.
+- La première étape du wizard de dépôt affiche parfois un écran supplémentaire "Type d'annonce" (Offre/Demande) selon la catégorie auto-détectée. L'orchestrateur la saute quand elle n'est pas présente.
+- DataDome (l'anti-bot de leboncoin) tolère un usage modéré dans une vraie session utilisateur. Ne descends pas le planning sous "quotidien".
 
-This project is **not affiliated with leboncoin.fr** in any way. It is provided "as is" under the MIT license — see [LICENSE](LICENSE).
+Ce projet n'est **pas affilié à leboncoin.fr**. Il est fourni "tel quel" sous licence MIT — voir [LICENSE](LICENSE).
 
 ## Roadmap
 
-- [ ] Visual picker for "Restreindre aux IDs" (auto-list listings with checkboxes)
-- [ ] Per-listing status (✓ bumped / ⏸ skipped / ✗ failed) in a dashboard
-- [ ] Persistent run history (last 5 cycles)
-- [ ] Optional micro-randomization of repost timestamps to look more natural
-- [ ] Open the body of a prospect inline (no need to leave the popup)
+- [ ] Sélecteur visuel pour "Restreindre aux IDs" (liste des annonces avec checkboxes)
+- [ ] Statut par annonce (✓ buméée / ⏸ skipped / ✗ failed) dans un dashboard
+- [ ] Historique persistant des derniers cycles
+- [ ] Micro-randomisation optionnelle des horaires de repost pour un aspect plus naturel
+- [ ] Ouvrir le corps d'un prospect inline (sans quitter le popup)
 
-## Contributing
+## Contribuer
 
-PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Selector fixes after a leboncoin redesign are the most valuable contribution.
+PRs bienvenues — voir [CONTRIBUTING.md](CONTRIBUTING.md). Les correctifs de sélecteurs après un redesign leboncoin sont la contribution la plus précieuse.
 
-## Credits
+## Crédits
 
-Built by [Odilon Hugonnot](https://www.web-developpeur.com) — full-stack backend dev (PHP/Symfony/Go), Besançon, France.
+Construit par [Odilon Hugonnot](https://www.web-developpeur.com) — dev full-stack/backend (PHP/Symfony/Go), Besançon.
+
+---
+
+<a id="english"></a>
+## English
+
+Chrome MV3 extension that auto-bumps your leboncoin listings every week and watches for tech demands matching your skills.
+
+**Quick start:**
+
+```bash
+git clone https://github.com/ohugonnot/leboncoin-bumper.git
+```
+
+Then `chrome://extensions` → enable Developer mode → "Load unpacked" → select the cloned folder.
+
+The full docs are in French above — the codebase, identifiers and inline JSDoc are in English, so contributing is language-neutral.
+
+This project automates user actions on a third-party site (leboncoin.fr) which is against their Terms of Service. Use at your own risk on personal accounts. See the [disclaimer in LICENSE](LICENSE).
