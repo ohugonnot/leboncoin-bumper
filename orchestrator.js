@@ -53,6 +53,15 @@ export async function runCycle({ trigger }) {
         data.catSlug = target.catSlug;
         await log(`  scraped: ${data.photos.length} photos, ${data.body.length} body chars`);
 
+        const { listingEdits = {} } = await chrome.storage.local.get('listingEdits');
+        const edit = listingEdits[target.id];
+        if (edit) {
+          if (edit.subject) data.subject = edit.subject;
+          if (edit.body) data.body = edit.body;
+          if (edit.price) data.price = edit.price;
+          await log(`  [edit] Annonce modifiée localement : ${Object.keys(edit).filter(k => edit[k]).join(', ')}`);
+        }
+
         if (settings.dryRun) {
           await log('  [dry-run] would delete + repost. Skipping.');
           success++;

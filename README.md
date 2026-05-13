@@ -42,6 +42,7 @@ Tout tourne dans ton navigateur. **Aucune donnée ne quitte ta machine.** Pas de
 - **Annonces "en pause" détectées et ignorées** automatiquement
 - **Planning hebdomadaire** précis (jour + heure + jitter optionnel pour humaniser)
 - **🤖 Smart Bump** : planifie au prochain créneau de forte affluence selon la catégorie de tes annonces (services/B2B en journée, loisirs/tech en soirée, immo/véhicules le soir et weekend)
+- **Éditer avant republier** : modifier titre, description ou prix d'une annonce sans la modifier sur Leboncoin (qui demande un paiement). Les modifications s'appliquent au prochain bump.
 - **Mode test (dry-run)** pour prévisualiser sans rien toucher
 - **Confirmation explicite** avant chaque cycle réel
 

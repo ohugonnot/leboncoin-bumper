@@ -34,10 +34,11 @@ const b = {
 
 // Cached reference to stored listings — needed for select-all / select-none
 let _currentStoredListings = null;
+let _currentListingEdits = {};
 
 export async function loadBumper() {
-  const { settings = {}, log = [], myListings, lastBumpRun, bumpHistory = [] } =
-    await chrome.storage.local.get(['settings', 'log', 'myListings', 'lastBumpRun', 'bumpHistory']);
+  const { settings = {}, log = [], myListings, lastBumpRun, bumpHistory = [], listingEdits = {} } =
+    await chrome.storage.local.get(['settings', 'log', 'myListings', 'lastBumpRun', 'bumpHistory', 'listingEdits']);
   b.enabled.checked = !!settings.enabled;
   b.dryRun.checked = settings.dryRun !== false;
   b.dayOfWeek.value = settings.dayOfWeek ?? 1;
@@ -45,7 +46,7 @@ export async function loadBumper() {
   b.minute.value = settings.minute ?? 0;
   b.jitterMinutes.value = settings.jitterMinutes ?? 60;
   renderLog(log);
-  renderListings(myListings, new Set(settings.onlyAdIds || []));
+  renderListings(myListings, new Set(settings.onlyAdIds || []), listingEdits);
   updateActionHint();
   renderBumpHistory(bumpHistory);
   renderPeakMeta(myListings, settings);
@@ -220,8 +221,9 @@ function classifyStatus(s) {
   return '';
 }
 
-function renderListings(stored, selectedIds) {
+function renderListings(stored, selectedIds, listingEdits = {}) {
   _currentStoredListings = stored;
+  _currentListingEdits = listingEdits;
   b.listings.innerHTML = '';
   if (!stored?.listings?.length) {
     const empty = document.createElement('div');
@@ -248,6 +250,7 @@ function renderListings(stored, selectedIds) {
 
   for (const it of stored.listings) {
     const isPaused = /pause/i.test(it.status || '');
+    const hasEdit = !!(listingEdits[it.id] && Object.values(listingEdits[it.id]).some(Boolean));
     const row = document.createElement('label');
     row.className = 'listing'
       + (selectedIds.has(it.id) ? ' checked' : '')
@@ -278,6 +281,9 @@ function renderListings(stored, selectedIds) {
     const ageHtml = it.publishedAt
       ? `<span class="listing-age">${timeAgo(new Date(it.publishedAt))}</span>`
       : '';
+    const editBadgeHtml = hasEdit
+      ? `<span class="listing-edit-badge">✏️ Modifié</span>`
+      : '';
     body.innerHTML = `
       <div class="listing-title" title="${escapeAttr(it.title)}">${escapeHtml(it.title || '(sans titre)')}</div>
       ${ageHtml}
@@ -285,6 +291,7 @@ function renderListings(stored, selectedIds) {
         ${it.status ? `<span class="status-badge ${classifyStatus(it.status)}">${escapeHtml(it.status)}</span>` : ''}
         <span class="listing-id">${escapeHtml(it.id)}</span>
         ${it.catSlug ? `<span>· ${escapeHtml(it.catSlug)}</span>` : ''}
+        ${editBadgeHtml}
       </div>
       ${renderStatsHtml(it.stats)}
     `;
@@ -300,8 +307,96 @@ function renderListings(stored, selectedIds) {
     });
     row.appendChild(dupBtn);
 
+    const editBtn = document.createElement('button');
+    editBtn.className = 'listing-edit-btn';
+    editBtn.textContent = '✏️ Éditer';
+    editBtn.title = 'Modifier titre, description ou prix avant le prochain repost (sans payer leboncoin).';
+    editBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      toggleEditForm(it, row, listingEdits);
+    });
+    row.appendChild(editBtn);
+
     b.listings.appendChild(row);
   }
+}
+
+// Toggle the inline edit form on a listing row.
+// Each row can have at most one open form — clicking the button again collapses it.
+function toggleEditForm(listing, row, listingEdits) {
+  const existing = row.querySelector('.listing-edit-form');
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  const edit = listingEdits[listing.id] || {};
+  const form = document.createElement('div');
+  form.className = 'listing-edit-form';
+  form.innerHTML = `
+    <div class="field">
+      <label>Titre</label>
+      <input type="text" class="edit-subject" value="${escapeAttr(edit.subject || '')}" placeholder="${escapeAttr(listing.title || '')}">
+      <span class="listing-edit-hint">Laisser vide pour conserver la valeur actuelle de l'annonce</span>
+    </div>
+    <div class="field">
+      <label>Description</label>
+      <textarea class="edit-body" rows="3">${escapeHtml(edit.body || '')}</textarea>
+      <span class="listing-edit-hint">Laisser vide pour conserver la valeur actuelle de l'annonce</span>
+    </div>
+    <div class="field">
+      <label>Prix (€)</label>
+      <input type="number" class="edit-price" value="${escapeAttr(edit.price || '')}" min="0" placeholder="—">
+      <span class="listing-edit-hint">Laisser vide pour conserver la valeur actuelle de l'annonce</span>
+    </div>
+    <div class="listing-edit-actions">
+      <button class="btn primary small edit-save-btn">Enregistrer</button>
+      <button class="btn ghost small edit-reset-btn">Réinitialiser</button>
+    </div>
+  `;
+
+  // Prevent checkbox toggle when interacting with the form
+  form.addEventListener('click', (e) => e.preventDefault());
+
+  form.querySelector('.edit-save-btn').addEventListener('click', async (e) => {
+    e.preventDefault();
+    const subject = form.querySelector('.edit-subject').value.trim();
+    const body = form.querySelector('.edit-body').value.trim();
+    const price = form.querySelector('.edit-price').value.trim();
+
+    const { listingEdits: stored = {} } = await chrome.storage.local.get('listingEdits');
+    const next = { ...stored };
+    const patch = {};
+    if (subject) patch.subject = subject;
+    if (body) patch.body = body;
+    if (price) patch.price = price;
+
+    if (Object.keys(patch).length) {
+      next[listing.id] = patch;
+    } else {
+      delete next[listing.id];
+    }
+    await chrome.storage.local.set({ listingEdits: next });
+    _currentListingEdits = next;
+
+    // Re-render to show/hide badge
+    const { settings = {} } = await chrome.storage.local.get('settings');
+    renderListings(_currentStoredListings, new Set(settings.onlyAdIds || []), next);
+  });
+
+  form.querySelector('.edit-reset-btn').addEventListener('click', async (e) => {
+    e.preventDefault();
+    const { listingEdits: stored = {} } = await chrome.storage.local.get('listingEdits');
+    const next = { ...stored };
+    delete next[listing.id];
+    await chrome.storage.local.set({ listingEdits: next });
+    _currentListingEdits = next;
+
+    const { settings = {} } = await chrome.storage.local.get('settings');
+    renderListings(_currentStoredListings, new Set(settings.onlyAdIds || []), next);
+  });
+
+  row.appendChild(form);
 }
 
 function showBackupStatus(msg, isError = false) {
@@ -528,7 +623,7 @@ export function initBumper() {
     const next = { ...settings, onlyAdIds: [...ids] };
     await chrome.storage.local.set({ settings: next });
     await chrome.runtime.sendMessage({ type: 'RESCHEDULE' });
-    renderListings(_currentStoredListings, ids);
+    renderListings(_currentStoredListings, ids, _currentListingEdits);
   });
 
   b.selectNone.addEventListener('click', async () => {
@@ -537,7 +632,7 @@ export function initBumper() {
     const next = { ...settings, onlyAdIds: [] };
     await chrome.storage.local.set({ settings: next });
     await chrome.runtime.sendMessage({ type: 'RESCHEDULE' });
-    renderListings(_currentStoredListings, new Set());
+    renderListings(_currentStoredListings, new Set(), _currentListingEdits);
   });
 
   b.backupExport.addEventListener('click', () => handleBackupExport());
@@ -561,8 +656,8 @@ export function initBumper() {
         b.selectionHint.textContent = `Erreur : ${r?.error || 'inconnue'}`;
         return;
       }
-      const { settings = {} } = await chrome.storage.local.get('settings');
-      renderListings(r.result, new Set(settings.onlyAdIds || []));
+      const { settings = {}, listingEdits = {} } = await chrome.storage.local.get(['settings', 'listingEdits']);
+      renderListings(r.result, new Set(settings.onlyAdIds || []), listingEdits);
     } finally {
       b.refreshListings.disabled = false;
       b.refreshListings.innerHTML = '⟳ Charger mes annonces';
