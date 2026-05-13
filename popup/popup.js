@@ -634,6 +634,20 @@ p.markSeen.addEventListener('click', async () => {
 
 let activeInboxFilter = 'all';
 
+// Returns counts of visible (non-archived) conversations per category, plus archived total.
+function computeVisibleCounts(all, dismissedSet) {
+  const counts = { scam: 0, lead: 0, question: 0, spam: 0, archived: 0 };
+  for (const conv of all) {
+    if (dismissedSet.has(conv.conversationId)) {
+      counts.archived++;
+    } else {
+      const cat = conv._classification?.category;
+      if (cat in counts) counts[cat]++;
+    }
+  }
+  return counts;
+}
+
 async function loadInbox() {
   const { inboxCache, inboxLastRun, inboxDismissed = [] } = await chrome.storage.local.get([
     'inboxCache', 'inboxLastRun', 'inboxDismissed'
@@ -651,18 +665,89 @@ async function loadInbox() {
   renderInbox(inboxCache, new Set(inboxDismissed));
 }
 
+function renderInboxCard(conv, dismissed, { isArchived = false } = {}) {
+  const cls = conv._classification || { category: 'lead', signals: [], confidence: 0 };
+  const cat = cls.category;
+
+  // Strip the "Nouveau message pour " prefix from subject for cleaner display
+  const subject = (conv.subject || '').replace(/^nouveau message pour ["«]?/i, '').replace(/["»]? sur leboncoin$/i, '');
+  const preview = (conv.lastMessagePreview || '').slice(0, 200);
+  const date = conv.lastMessageDate ? relativeTime(new Date(conv.lastMessageDate)) : '';
+  const badgeLabel = { scam: '🚨 Scam', lead: '💬 Lead', question: '❓ Question', spam: '🗑 Spam' }[cat] || cat;
+
+  const card = document.createElement('div');
+  card.className = `card cat-${cat}`;
+  card.innerHTML = `
+    <div class="card-top">
+      <span class="card-title">${escapeHtml(conv.partnerName || '(inconnu)')}</span>
+      <span class="badge cat-${cat}">${badgeLabel}</span>
+      ${conv.unseenCounter > 0 ? `<span class="badge new">${conv.unseenCounter} non lu</span>` : ''}
+    </div>
+    <div class="card-subject">${escapeHtml(subject)}</div>
+    ${date ? `<div class="card-meta"><span class="age">${escapeHtml(date)}</span></div>` : ''}
+    <div class="card-body">${escapeHtml(preview)}</div>
+    ${cls.signals.length ? `<div class="card-signals">Détecté : ${escapeHtml(cls.signals.map(s => s.replace(/-/g, ' ')).join(', '))}</div>` : ''}
+    <div class="card-actions">
+      <button class="btn ghost small open-conv-btn">Ouvrir conversation</button>
+      ${isArchived
+        ? `<button class="btn ghost small restore-btn">↩ Restaurer</button>`
+        : `<button class="btn ghost small dismiss-btn" title="Cache localement, ne supprime rien côté Leboncoin">✓ Archiver</button>`
+      }
+    </div>
+  `;
+
+  card.querySelector('.open-conv-btn').addEventListener('click', () => {
+    chrome.tabs.create({ url: `https://www.leboncoin.fr/messages/id/${conv.conversationId}` });
+  });
+
+  if (isArchived) {
+    card.querySelector('.restore-btn').addEventListener('click', async () => {
+      await chrome.runtime.sendMessage({ type: 'INBOX_RESTORE', convId: conv.conversationId });
+      card.remove();
+      dismissed.delete(conv.conversationId);
+    });
+  } else {
+    card.querySelector('.dismiss-btn').addEventListener('click', async () => {
+      await chrome.runtime.sendMessage({ type: 'INBOX_DISMISS', convId: conv.conversationId });
+      card.remove();
+      dismissed.add(conv.conversationId);
+    });
+  }
+
+  return card;
+}
+
 function renderInbox(cache, dismissed) {
-  const counts = cache?.counts || { scam: 0, lead: 0, question: 0, spam: 0 };
-  document.getElementById('m-stat-scam').textContent     = counts.scam     ?? '–';
-  document.getElementById('m-stat-lead').textContent     = counts.lead     ?? '–';
-  document.getElementById('m-stat-question').textContent = counts.question ?? '–';
-  document.getElementById('m-stat-spam').textContent     = counts.spam     ?? '–';
+  const all = cache?.all || [];
+  const counts = computeVisibleCounts(all, dismissed);
+
+  const total = counts.scam + counts.lead + counts.question + counts.spam;
+
+  // Update stat cells
+  document.getElementById('m-stat-scam').textContent     = all.length ? counts.scam     : '–';
+  document.getElementById('m-stat-lead').textContent     = all.length ? counts.lead     : '–';
+  document.getElementById('m-stat-question').textContent = all.length ? counts.question : '–';
+  document.getElementById('m-stat-spam').textContent     = all.length ? counts.spam     : '–';
+  document.getElementById('m-stat-archived').textContent = all.length ? counts.archived : '–';
+
+  // Update filter button labels with counts
+  const filterLabels = {
+    all:      `Tous (${total})`,
+    scam:     `🚨 Scam (${counts.scam})`,
+    lead:     `💬 Leads (${counts.lead})`,
+    question: `❓ Questions (${counts.question})`,
+    spam:     `🗑 Spam (${counts.spam})`,
+    archived: `📦 Archivés (${counts.archived})`,
+  };
+  document.querySelectorAll('.inbox-filter').forEach(btn => {
+    const label = filterLabels[btn.dataset.filter];
+    if (label) btn.textContent = label;
+  });
 
   const list = document.getElementById('m-list');
   const hint = document.getElementById('m-empty-hint');
   list.innerHTML = '';
 
-  const all = cache?.all || [];
   if (!all.length) {
     hint.hidden = false;
     hint.textContent = cache
@@ -672,10 +757,13 @@ function renderInbox(cache, dismissed) {
   }
   hint.hidden = true;
 
-  const visible = all.filter(c =>
-    !dismissed.has(c.conversationId) &&
-    (activeInboxFilter === 'all' || c._classification?.category === activeInboxFilter)
-  );
+  const isArchived = activeInboxFilter === 'archived';
+  const visible = all.filter(c => {
+    const archived = dismissed.has(c.conversationId);
+    if (isArchived) return archived;
+    if (archived) return false;
+    return activeInboxFilter === 'all' || c._classification?.category === activeInboxFilter;
+  });
 
   if (!visible.length) {
     hint.hidden = false;
@@ -684,42 +772,7 @@ function renderInbox(cache, dismissed) {
   }
 
   for (const conv of visible) {
-    const cls = conv._classification || { category: 'lead', signals: [], confidence: 0 };
-    const cat = cls.category;
-
-    // Strip the "Nouveau message pour " prefix from subject for cleaner display
-    const subject = (conv.subject || '').replace(/^nouveau message pour ["«]?/i, '').replace(/["»]? sur leboncoin$/i, '');
-    const preview = (conv.lastMessagePreview || '').slice(0, 200);
-    const date = conv.lastMessageDate ? relativeTime(new Date(conv.lastMessageDate)) : '';
-    const signalText = cls.signals.length ? `Détecté : ${cls.signals.map(s => s.replace(/-/g, ' ')).join(', ')}` : '';
-    const badgeLabel = { scam: '🚨 Scam', lead: '💬 Lead', question: '❓ Question', spam: '🗑 Spam' }[cat] || cat;
-
-    const card = document.createElement('div');
-    card.className = `card cat-${cat}`;
-    card.innerHTML = `
-      <div class="card-top">
-        <span class="card-title">${escapeHtml(conv.partnerName || '(inconnu)')}</span>
-        <span class="badge cat-${cat}">${badgeLabel}</span>
-        ${conv.unseenCounter > 0 ? `<span class="badge new">${conv.unseenCounter} non lu</span>` : ''}
-      </div>
-      <div class="card-subject">${escapeHtml(subject)}</div>
-      ${date ? `<div class="card-meta"><span class="age">${escapeHtml(date)}</span></div>` : ''}
-      <div class="card-body">${escapeHtml(preview)}</div>
-      ${signalText ? `<div class="card-signals">Détecté : ${escapeHtml(cls.signals.map(s => s.replace(/-/g, ' ')).join(', '))}</div>` : ''}
-      <div class="card-actions">
-        <button class="btn ghost small open-conv-btn">Ouvrir conversation</button>
-        <button class="btn ghost small dismiss-btn">✓ Marquer traité</button>
-      </div>
-    `;
-    card.querySelector('.open-conv-btn').addEventListener('click', () => {
-      chrome.tabs.create({ url: `https://www.leboncoin.fr/messages/id/${conv.conversationId}` });
-    });
-    card.querySelector('.dismiss-btn').addEventListener('click', async () => {
-      await chrome.runtime.sendMessage({ type: 'INBOX_DISMISS', convId: conv.conversationId });
-      card.remove();
-      dismissed.add(conv.conversationId);
-    });
-    list.appendChild(card);
+    list.appendChild(renderInboxCard(conv, dismissed, { isArchived }));
   }
 }
 
