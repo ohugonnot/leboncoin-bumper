@@ -27,6 +27,7 @@
 
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="bumper" role="tab" aria-selected="true" aria-controls="panel-bumper">↻ Republier</button>
+    <button class="tab" data-tab="messages" role="tab" aria-selected="false" aria-controls="panel-messages">💬 Messages</button>
     <button class="tab" data-tab="prospect" role="tab" aria-selected="false" aria-controls="panel-prospect">🎯 Prospects</button>
   </nav>
 
@@ -94,6 +95,40 @@
     </details>
   </section>
 
+  <!-- MESSAGES PANEL ──────────────────────────────────────────── -->
+  <section class="panel" data-panel="messages" role="tabpanel" id="panel-messages">
+
+    <div class="inbox-meta">
+      <div class="stat"><span class="n" id="m-stat-scam">–</span><span class="l">🚨 Scam</span></div>
+      <div class="stat"><span class="n" id="m-stat-lead">–</span><span class="l">💬 Leads</span></div>
+      <div class="stat"><span class="n" id="m-stat-question">–</span><span class="l">❓ Questions</span></div>
+      <div class="stat"><span class="n" id="m-stat-spam">–</span><span class="l">🗑 Spam</span></div>
+    </div>
+
+    <div class="row" style="margin-bottom: 10px;">
+      <button class="btn primary" id="m-refresh">🔄 Rafraîchir la boîte</button>
+    </div>
+
+    <div class="banner warning" id="m-error-banner" hidden>
+      <span class="banner-icon">⚠️</span>
+      <div class="banner-content" id="m-error-text"></div>
+    </div>
+
+    <div class="inbox-filter-tabs" role="tablist">
+      <button class="inbox-filter active" data-filter="all">Tous</button>
+      <button class="inbox-filter cat-scam-filter" data-filter="scam">🚨 Scam</button>
+      <button class="inbox-filter cat-lead-filter" data-filter="lead">💬 Leads</button>
+      <button class="inbox-filter cat-question-filter" data-filter="question">❓ Questions</button>
+      <button class="inbox-filter cat-spam-filter" data-filter="spam">🗑 Spam</button>
+    </div>
+
+    <p class="section-hint" id="m-empty-hint">
+      Clique sur "Rafraîchir" pour charger ta boîte de réception leboncoin.
+    </p>
+
+    <div class="inbox-list" id="m-list"></div>
+  </section>
+
   <!-- PROSPECT PANEL ──────────────────────────────────────────── -->
   <section class="panel" data-panel="prospect" role="tabpanel" id="panel-prospect">
     <!-- Profile picker — multi-veille -->
@@ -115,10 +150,14 @@
       <button class="btn secondary" id="p-mark-seen">✓ Tout marquer vu</button>
     </div>
 
+    <div class="scan-progress" id="p-scan-progress" hidden></div>
+
     <p class="section-hint" id="p-empty-hint">
       Le scan interroge l'API leboncoin sur tes mots-clés (par défaut&nbsp;: profils dev/web/IA/automatisation).
       Premier scan : ~30 à 60 secondes.
     </p>
+
+    <p class="section-hint small" id="p-scan-limits-hint">ℹ️ Le scan vérifie jusqu'à <strong>1 000 annonces par mot-clé</strong> (limite API leboncoin). Plus tu as de mots-clés, plus c'est long.</p>
 
     <div class="prospect-list" id="p-list"></div>
 

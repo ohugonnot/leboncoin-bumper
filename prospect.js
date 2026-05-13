@@ -230,8 +230,40 @@ export function buildEntry(ad, { score, kw, isNew }) {
     age_days: Math.round(ageDays(ad.first_publication_date) ?? 0),
     score,
     kw_hit: kw,
-    is_new: isNew
+    is_new: isNew,
+    owner_id: String(ad.owner?.user_id || ad.owner?.store_id || ''),
+    owner_name: ad.owner?.name || '',
+    owner_type: ad.owner?.type || ''
   };
+}
+
+/**
+ * Group entries by owner. Owner-less ads stay individual.
+ * Preserves the relative order of primaries (the first entry seen per
+ * owner becomes the primary, and groups appear in that first-seen order).
+ *
+ * @param {object[]} entries  already sorted by sortEntries
+ * @returns {Array<{ownerId, ownerName, ownerType, primary, others}>}
+ */
+export function groupByOwner(entries) {
+  const groups = new Map();
+  const order = [];
+  for (const entry of entries) {
+    const key = entry.owner_id ? entry.owner_id : `solo:${entry.list_id}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        ownerId: entry.owner_id || '',
+        ownerName: entry.owner_name || '',
+        ownerType: entry.owner_type || '',
+        primary: entry,
+        others: []
+      });
+      order.push(key);
+    } else {
+      groups.get(key).others.push(entry);
+    }
+  }
+  return order.map(k => groups.get(k));
 }
 
 /**

@@ -240,7 +240,7 @@ b.refreshListings.addEventListener('click', async () => {
 });
 
 // ─── Prospect panel ────────────────────────────────────────────────────────
-import { DEFAULT_REPLY_TEMPLATE, formatReplyTemplate } from '../prospect.js';
+import { DEFAULT_REPLY_TEMPLATE, formatReplyTemplate, groupByOwner } from '../prospect.js';
 
 const p = {
   // Global settings (apply to all profiles)
@@ -365,10 +365,21 @@ function renderProspects(results, lastRun, seenSet, ignoredSet = new Set()) {
   }
 
   p.list.innerHTML = '';
-  for (const r of visible) {
+  const groups = groupByOwner(visible);
+  for (const group of groups) {
+    const r = group.primary;
     const isNew = !seenSet.has(r.list_id);
     const card = document.createElement('div');
     card.className = 'card' + (isNew ? ' new' : ' seen');
+
+    const ownerHtml = r.owner_name
+      ? `<div class="card-owner">par ${escapeHtml(r.owner_name)}</div>`
+      : '';
+
+    const ignoreAllBtn = group.others.length > 0
+      ? `<button class="btn ghost small ignore-all-btn">🚫 Tout ignorer du vendeur</button>`
+      : '';
+
     card.innerHTML = `
       <div class="card-top">
         <a class="card-title" href="${escapeAttr(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.subject)}</a>
@@ -376,6 +387,7 @@ function renderProspects(results, lastRun, seenSet, ignoredSet = new Set()) {
         ${r.already_contacted ? '<span class="badge contacted" title="Tu as déjà une conversation avec cette annonce">✉ DÉJÀ</span>' : ''}
         <span class="badge score" title="${escapeAttr(r.score_breakdown ? r.score_breakdown.join('\n') : 'Score de pertinence')}">★ ${r.score}</span>
       </div>
+      ${ownerHtml}
       <div class="card-meta">
         <span class="loc">${escapeHtml(r.location)}</span>
         <span class="age">${r.age_days}j</span>
@@ -385,11 +397,50 @@ function renderProspects(results, lastRun, seenSet, ignoredSet = new Set()) {
       <div class="card-body">${escapeHtml((r.body || '').slice(0, 400))}</div>
       <div class="card-actions">
         <button class="btn ghost small ignore-btn" data-id="${escapeAttr(r.list_id)}" title="Masquer définitivement (ne reviendra pas dans les prochains scans)">✗ Ignorer</button>
+        ${ignoreAllBtn}
         <button class="btn ghost small contact-btn" data-id="${escapeAttr(r.list_id)}" ${r.already_contacted ? 'title="Tu as déjà contacté — ouvre /reply pour relancer"' : ''}>✉ ${r.already_contacted ? 'Relancer' : 'Contacter'}</button>
       </div>
     `;
     card.querySelector('.contact-btn').addEventListener('click', () => onContact(r));
     card.querySelector('.ignore-btn').addEventListener('click', () => onIgnore(r));
+    if (group.others.length > 0) {
+      card.querySelector('.ignore-all-btn').addEventListener('click', () => onIgnoreAll(group));
+    }
+
+    if (group.others.length > 0) {
+      const toggle = document.createElement('button');
+      toggle.className = 'subads-toggle';
+      toggle.textContent = `▸ ${group.others.length} autre${group.others.length > 1 ? 's' : ''} annonce${group.others.length > 1 ? 's' : ''} du même vendeur (${group.ownerName || '?'})`;
+
+      const subadsDiv = document.createElement('div');
+      subadsDiv.className = 'subads';
+      subadsDiv.hidden = true;
+
+      for (const sub of group.others) {
+        const row = document.createElement('div');
+        row.className = 'subad';
+        const subIsNew = !seenSet.has(sub.list_id);
+        row.innerHTML = `
+          <a href="${escapeAttr(sub.url)}" target="_blank" rel="noopener">${escapeHtml(sub.subject)}</a>
+          ${subIsNew ? '<span class="badge new" style="font-size:9px">NOUV.</span>' : ''}
+          <span class="age">${sub.age_days}j</span>
+          ${sub.price ? `<span class="price">${sub.price} €</span>` : ''}
+          <button class="btn ghost small ignore-btn">✗</button>
+        `;
+        row.querySelector('.ignore-btn').addEventListener('click', () => onIgnore(sub));
+        subadsDiv.appendChild(row);
+      }
+
+      toggle.addEventListener('click', () => {
+        const open = !subadsDiv.hidden;
+        subadsDiv.hidden = open;
+        toggle.textContent = (open ? '▸' : '▾') + toggle.textContent.slice(1);
+      });
+
+      card.appendChild(toggle);
+      card.appendChild(subadsDiv);
+    }
+
     p.list.appendChild(card);
   }
 
@@ -408,6 +459,20 @@ async function onIgnore(prospect) {
   const { prospectIgnoredIdsByProfile = {}, activeProfileId } = await chrome.storage.local.get(['prospectIgnoredIdsByProfile', 'activeProfileId']);
   const next = new Set(prospectIgnoredIdsByProfile[activeProfileId] || []);
   next.add(prospect.list_id);
+  await chrome.storage.local.set({
+    prospectIgnoredIdsByProfile: {
+      ...prospectIgnoredIdsByProfile,
+      [activeProfileId]: [...next].slice(-5000)
+    }
+  });
+  await loadProspect();
+}
+
+async function onIgnoreAll(group) {
+  const { prospectIgnoredIdsByProfile = {}, activeProfileId } = await chrome.storage.local.get(['prospectIgnoredIdsByProfile', 'activeProfileId']);
+  const next = new Set(prospectIgnoredIdsByProfile[activeProfileId] || []);
+  next.add(group.primary.list_id);
+  for (const sub of group.others) next.add(sub.list_id);
   await chrome.storage.local.set({
     prospectIgnoredIdsByProfile: {
       ...prospectIgnoredIdsByProfile,
@@ -556,6 +621,129 @@ p.markSeen.addEventListener('click', async () => {
   await loadProspect();
 });
 
+// ─── Messages / Inbox panel ────────────────────────────────────────────────
+
+let activeInboxFilter = 'all';
+
+async function loadInbox() {
+  const { inboxCache, inboxLastRun, inboxDismissed = [] } = await chrome.storage.local.get([
+    'inboxCache', 'inboxLastRun', 'inboxDismissed'
+  ]);
+
+  const errorBanner = document.getElementById('m-error-banner');
+  const errorText = document.getElementById('m-error-text');
+  if (inboxLastRun?.error) {
+    errorBanner.hidden = false;
+    errorText.textContent = `Le chargement a échoué : ${inboxLastRun.error}`;
+  } else {
+    errorBanner.hidden = true;
+  }
+
+  renderInbox(inboxCache, new Set(inboxDismissed));
+}
+
+function renderInbox(cache, dismissed) {
+  const counts = cache?.counts || { scam: 0, lead: 0, question: 0, spam: 0 };
+  document.getElementById('m-stat-scam').textContent     = counts.scam     ?? '–';
+  document.getElementById('m-stat-lead').textContent     = counts.lead     ?? '–';
+  document.getElementById('m-stat-question').textContent = counts.question ?? '–';
+  document.getElementById('m-stat-spam').textContent     = counts.spam     ?? '–';
+
+  const list = document.getElementById('m-list');
+  const hint = document.getElementById('m-empty-hint');
+  list.innerHTML = '';
+
+  const all = cache?.all || [];
+  if (!all.length) {
+    hint.hidden = false;
+    hint.textContent = cache
+      ? 'Aucune conversation dans ta boîte.'
+      : 'Clique sur "Rafraîchir" pour charger ta boîte de réception leboncoin.';
+    return;
+  }
+  hint.hidden = true;
+
+  const visible = all.filter(c =>
+    !dismissed.has(c.conversationId) &&
+    (activeInboxFilter === 'all' || c._classification?.category === activeInboxFilter)
+  );
+
+  if (!visible.length) {
+    hint.hidden = false;
+    hint.textContent = 'Aucune conversation dans cette catégorie.';
+    return;
+  }
+
+  for (const conv of visible) {
+    const cls = conv._classification || { category: 'lead', signals: [], confidence: 0 };
+    const cat = cls.category;
+
+    // Strip the "Nouveau message pour " prefix from subject for cleaner display
+    const subject = (conv.subject || '').replace(/^nouveau message pour ["«]?/i, '').replace(/["»]? sur leboncoin$/i, '');
+    const preview = (conv.lastMessagePreview || '').slice(0, 200);
+    const date = conv.lastMessageDate ? relativeTime(new Date(conv.lastMessageDate)) : '';
+    const signalText = cls.signals.length ? `Détecté : ${cls.signals.map(s => s.replace(/-/g, ' ')).join(', ')}` : '';
+    const badgeLabel = { scam: '🚨 Scam', lead: '💬 Lead', question: '❓ Question', spam: '🗑 Spam' }[cat] || cat;
+
+    const card = document.createElement('div');
+    card.className = `card cat-${cat}`;
+    card.innerHTML = `
+      <div class="card-top">
+        <span class="card-title">${escapeHtml(conv.partnerName || '(inconnu)')}</span>
+        <span class="badge cat-${cat}">${badgeLabel}</span>
+        ${conv.unseenCounter > 0 ? `<span class="badge new">${conv.unseenCounter} non lu</span>` : ''}
+      </div>
+      <div class="card-subject">${escapeHtml(subject)}</div>
+      ${date ? `<div class="card-meta"><span class="age">${escapeHtml(date)}</span></div>` : ''}
+      <div class="card-body">${escapeHtml(preview)}</div>
+      ${signalText ? `<div class="card-signals">Détecté : ${escapeHtml(cls.signals.map(s => s.replace(/-/g, ' ')).join(', '))}</div>` : ''}
+      <div class="card-actions">
+        <button class="btn ghost small open-conv-btn">Ouvrir conversation</button>
+        <button class="btn ghost small dismiss-btn">✓ Marquer traité</button>
+      </div>
+    `;
+    card.querySelector('.open-conv-btn').addEventListener('click', () => {
+      chrome.tabs.create({ url: `https://www.leboncoin.fr/messagerie/${conv.conversationId}` });
+    });
+    card.querySelector('.dismiss-btn').addEventListener('click', async () => {
+      await chrome.runtime.sendMessage({ type: 'INBOX_DISMISS', convId: conv.conversationId });
+      card.remove();
+      dismissed.add(conv.conversationId);
+    });
+    list.appendChild(card);
+  }
+}
+
+function relativeTime(date) {
+  const sec = Math.round((Date.now() - date.getTime()) / 1000);
+  if (sec < 60) return 'à l\'instant';
+  if (sec < 3600) return `il y a ${Math.round(sec / 60)} min`;
+  if (sec < 86400) return `il y a ${Math.round(sec / 3600)} h`;
+  return `il y a ${Math.round(sec / 86400)} j`;
+}
+
+document.getElementById('m-refresh').addEventListener('click', async () => {
+  const btn = document.getElementById('m-refresh');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-inline"></span>Chargement…';
+  try {
+    await chrome.runtime.sendMessage({ type: 'INBOX_REFRESH' });
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 Rafraîchir la boîte';
+    await loadInbox();
+  }
+});
+
+document.querySelectorAll('.inbox-filter').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    activeInboxFilter = btn.dataset.filter;
+    document.querySelectorAll('.inbox-filter').forEach(b => b.classList.toggle('active', b === btn));
+    const { inboxCache, inboxDismissed = [] } = await chrome.storage.local.get(['inboxCache', 'inboxDismissed']);
+    renderInbox(inboxCache, new Set(inboxDismissed));
+  });
+});
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
@@ -563,9 +751,31 @@ function escapeHtml(s) {
 }
 function escapeAttr(s) { return escapeHtml(s); }
 
+function updateScanProgress(progress) {
+  const el = document.getElementById('p-scan-progress');
+  const statRow = document.querySelector('.prospect-meta');
+  if (!el) return;
+  if (!progress) {
+    el.hidden = true;
+    if (statRow) statRow.hidden = false;
+    return;
+  }
+  const { kwIndex, kwTotal, kw, page, pageMax, found } = progress;
+  const pct = Math.round(((kwIndex - 1) + page / pageMax) / kwTotal * 100);
+  el.hidden = false;
+  el.innerHTML = `
+    <div class="scan-progress-label">Scan en cours… mot-clé ${kwIndex}/${kwTotal} (${escapeHtml(kw)}) · page ${page}/${pageMax} · ${found} annonces trouvées</div>
+    <div class="scan-progress-track"><div class="scan-progress-fill" style="width:${pct}%"></div></div>
+  `;
+  if (statRow) statRow.hidden = true;
+}
+
 // Live refresh — watch for per-profile storage keys (post-migration to multi-profile).
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.log) renderLog(changes.log.newValue || []);
+  if (changes.prospectScanProgress) {
+    updateScanProgress(changes.prospectScanProgress.newValue || null);
+  }
   if (changes.prospectResultsByProfile
     || changes.prospectLastRunByProfile
     || changes.prospectSeenIdsByProfile
@@ -578,8 +788,17 @@ chrome.storage.onChanged.addListener((changes) => {
   if (changes.myListings || changes.settings) {
     loadBumper();
   }
+  if (changes.inboxCache || changes.inboxLastRun || changes.inboxDismissed) {
+    loadInbox();
+  }
 });
 
 checkLogin();
 loadBumper();
 loadProspect();
+loadInbox();
+
+// Restore scan progress if popup is opened mid-scan
+chrome.storage.local.get('prospectScanProgress').then(({ prospectScanProgress }) => {
+  if (prospectScanProgress) updateScanProgress(prospectScanProgress);
+});
