@@ -2,6 +2,17 @@
 //   - lbc-weekly-bump: deletes & reposts the user's own listings.
 //   - lbc-weekly-prospect: scans leboncoin demands matching the user's tech profile.
 
+// MV3 popups auto-close on blur / tab switch. If a message handler returned
+// `true` (async response promised) and the popup leaves before sendResponse
+// fires, Chrome rejects the channel promise with "message channel closed".
+// The work itself succeeded (written to storage). Mute only this rejection.
+self.addEventListener('unhandledrejection', (e) => {
+  const msg = e.reason?.message || '';
+  if (msg.includes('message channel closed') || msg.includes('back/forward cache')) {
+    e.preventDefault();
+  }
+});
+
 import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm, fetchInboxViaTab } from './orchestrator.js';
 import { processRawAds, markResultsSeen, DEFAULT_KEYWORDS } from './prospect.js';
 import { classifyConversations } from './messaging.js';
@@ -116,18 +127,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'INBOX_DISMISS') {
     respond({ ok: true });
     (async () => {
-      const { inboxDismissed = [] } = await chrome.storage.local.get('inboxDismissed');
-      const next = new Set(inboxDismissed);
-      next.add(msg.convId);
-      await chrome.storage.local.set({ inboxDismissed: [...next].slice(-2000) });
+      try {
+        const { inboxDismissed = [] } = await chrome.storage.local.get('inboxDismissed');
+        const next = new Set(inboxDismissed);
+        next.add(msg.convId);
+        await chrome.storage.local.set({ inboxDismissed: [...next].slice(-2000) });
+      } catch (e) { console.warn('INBOX_DISMISS failed:', e); }
     })();
     return false;
   }
   if (msg.type === 'MARK_PROSPECTS_SEEN') {
     respond({ ok: true });
     (async () => {
-      const { activeProfileId } = await chrome.storage.local.get('activeProfileId');
-      await markResultsSeen(msg.results || [], activeProfileId);
+      try {
+        const { activeProfileId } = await chrome.storage.local.get('activeProfileId');
+        await markResultsSeen(msg.results || [], activeProfileId);
+      } catch (e) { console.warn('MARK_PROSPECTS_SEEN failed:', e); }
     })();
     return false;
   }
