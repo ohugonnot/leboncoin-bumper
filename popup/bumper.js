@@ -175,7 +175,7 @@ export function updateBumpProgress(progress) {
   }
   const { adIndex, adTotal, adTitle, phase } = progress;
   const pct = adTotal > 0 ? Math.round(adIndex / adTotal * 100) : 0;
-  const phaseLabel = { scrape: 'scrape', delete: 'suppression', repost: 'republication', done: 'terminé' }[phase] || phase;
+  const phaseLabel = { scrape: 'scrape', delete: 'suppression', repost: 'republication', done: 'terminé' }[phase] || '…';
   b.bumpProgress.hidden = false;
   b.bumpProgress.innerHTML = `
     <div class="scan-progress-label">Republication en cours… annonce ${adIndex}/${adTotal} (${escapeHtml(adTitle || '')}) — ${phaseLabel}</div>

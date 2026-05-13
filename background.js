@@ -390,7 +390,7 @@ chrome.notifications.onClicked.addListener(async (id) => {
   const url = pendingNotificationTarget.get(id);
   pendingNotificationTarget.delete(id);
   await chrome.notifications.clear(id);
-  if (url) {
+  if (url && url.startsWith('https://')) {
     chrome.tabs.create({ url });
   } else {
     chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html?fullpage=1#prospect') });

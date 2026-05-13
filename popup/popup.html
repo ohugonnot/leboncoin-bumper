@@ -26,13 +26,13 @@
   </div>
 
   <nav class="tabs" role="tablist">
-    <button class="tab active" data-tab="bumper" role="tab" aria-selected="true" aria-controls="panel-bumper">↻ Republier</button>
-    <button class="tab" data-tab="messages" role="tab" aria-selected="false" aria-controls="panel-messages">💬 Messages</button>
-    <button class="tab" data-tab="prospect" role="tab" aria-selected="false" aria-controls="panel-prospect">🎯 Prospects</button>
+    <button class="tab active" id="tab-bumper" data-tab="bumper" role="tab" aria-selected="true" aria-controls="panel-bumper">↻ Republier</button>
+    <button class="tab" id="tab-messages" data-tab="messages" role="tab" aria-selected="false" aria-controls="panel-messages">💬 Messages</button>
+    <button class="tab" id="tab-prospect" data-tab="prospect" role="tab" aria-selected="false" aria-controls="panel-prospect">🎯 Prospects</button>
   </nav>
 
   <!-- BUMPER PANEL ────────────────────────────────────────────── -->
-  <section class="panel active" data-panel="bumper" role="tabpanel" id="panel-bumper">
+  <section class="panel active" data-panel="bumper" role="tabpanel" id="panel-bumper" aria-labelledby="tab-bumper">
 
     <!-- 1. ANNONCES (la chose principale qu'on regarde) -->
     <div class="section">
@@ -146,7 +146,7 @@
   </section>
 
   <!-- MESSAGES PANEL ──────────────────────────────────────────── -->
-  <section class="panel" data-panel="messages" role="tabpanel" id="panel-messages">
+  <section class="panel" data-panel="messages" role="tabpanel" id="panel-messages" aria-labelledby="tab-messages">
 
     <div class="inbox-meta">
       <div class="stat"><span class="n stat-scam" id="m-stat-scam">–</span><span class="l">🚨 Scam</span></div>
@@ -199,7 +199,7 @@
   </section>
 
   <!-- PROSPECT PANEL ──────────────────────────────────────────── -->
-  <section class="panel" data-panel="prospect" role="tabpanel" id="panel-prospect">
+  <section class="panel" data-panel="prospect" role="tabpanel" id="panel-prospect" aria-labelledby="tab-prospect">
     <!-- Profile picker — multi-veille -->
     <div class="profile-bar">
       <select id="p-profile-select" title="Veille active"></select>
