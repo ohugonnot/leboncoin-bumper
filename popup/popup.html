@@ -38,7 +38,7 @@
     <div class="section">
       <div class="section-title-row">
         <h2 class="section-title">Mes annonces</h2>
-        <button class="btn ghost small" id="b-refresh-listings" title="Recharger depuis leboncoin">⟳ Charger</button>
+        <button class="btn ghost small" id="b-refresh-listings" title="Va sur leboncoin.fr récupérer la liste de tes annonces actives (titre, photos, statut).">⟳ Charger mes annonces</button>
       </div>
 
       <details class="score-help" id="b-help">
@@ -139,6 +139,7 @@
       <div class="stat"><span class="n stat-spam" id="m-stat-spam">–</span><span class="l">🗑 Spam</span></div>
       <div class="stat"><span class="n stat-archived" id="m-stat-archived">–</span><span class="l">📦 Archivés</span></div>
     </div>
+    <div class="last-run" id="m-last-run"></div>
 
     <div class="row" style="margin-bottom: 10px;">
       <button class="btn primary" id="m-refresh">🔄 Rafraîchir la boîte</button>
@@ -195,10 +196,22 @@
 
     <div class="row" style="margin-bottom: 10px;">
       <button class="btn primary" id="p-scan">🔍 Scanner maintenant</button>
-      <button class="btn secondary" id="p-mark-seen">✓ Tout marquer vu</button>
+      <button class="btn secondary" id="p-mark-seen" title="Retire le badge NOUV. de toutes les annonces affichées. N'efface rien — c'est juste un reset visuel.">✓ Tout marquer vu</button>
     </div>
 
     <div class="scan-progress" id="p-scan-progress" hidden></div>
+
+    <details class="score-help">
+      <summary><strong>Comment marche le score ★ ?</strong></summary>
+      <ul>
+        <li>Chaque mot-clé matché dans le <strong>titre</strong> → <code>+2 × poids</code></li>
+        <li>Matché seulement dans la <strong>description</strong> → <code>+1 × poids</code></li>
+        <li>Le titre contient <em>cherche / recherche / besoin / aide / demande / quelqu'un / conseil</em> → <code>+1</code></li>
+      </ul>
+      Poids par défaut : 1. Pour booster un mot-clé important, écris <code>recalbox:3</code> (poids 3).<br>
+      <strong>Survole le ★ d'une carte</strong> pour voir le détail du calcul.<br>
+      <strong>Score min</strong> = filtre d'affichage. <strong>Notif si score ≥</strong> = seuil pour t'alerter.
+    </details>
 
     <p class="section-hint" id="p-empty-hint">
       Le scan interroge l'API leboncoin sur tes mots-clés (par défaut&nbsp;: profils dev/web/IA/automatisation).
@@ -213,18 +226,6 @@
 
     <details class="section">
       <summary><h2 class="section-title">⚙️ Réglages de cette veille</h2></summary>
-
-      <div class="score-help">
-        <strong>Comment marche le score ★ ?</strong>
-        <ul>
-          <li>Chaque mot-clé matché dans le <strong>titre</strong> → <code>+2 × poids</code></li>
-          <li>Matché seulement dans la <strong>description</strong> → <code>+1 × poids</code></li>
-          <li>Le titre contient <em>cherche / recherche / besoin / aide / demande / quelqu'un / conseil</em> → <code>+1</code></li>
-        </ul>
-        Poids par défaut : 1. Pour booster un mot-clé important, écris <code>recalbox:3</code> (poids 3).<br>
-        <strong>Survole le ★ d'une carte</strong> pour voir le détail du calcul.<br>
-        <strong>Score min</strong> = filtre d'affichage. <strong>Notif si score ≥</strong> = seuil pour t'alerter.
-      </div>
 
       <label class="toggle">
         <input type="checkbox" id="p-enabled">

@@ -201,7 +201,7 @@ function renderListings(stored, selectedIds) {
     empty.className = 'empty';
     empty.textContent = stored?.fetchedAt
       ? 'Aucune annonce trouvée. Es-tu connecté à leboncoin ?'
-      : 'Clique ⟳ Charger pour récupérer tes annonces.';
+      : 'Clique ⟳ Charger mes annonces pour récupérer tes annonces.';
     b.listings.appendChild(empty);
     updateSelectionHint(stored, selectedIds);
     return;
@@ -358,7 +358,7 @@ b.refreshListings.addEventListener('click', async () => {
     renderListings(r.result, new Set(settings.onlyAdIds || []));
   } finally {
     b.refreshListings.disabled = false;
-    b.refreshListings.innerHTML = '⟳ Charger';
+    b.refreshListings.innerHTML = '⟳ Charger mes annonces';
   }
 });
 
@@ -769,11 +769,18 @@ async function loadInbox() {
 
   const errorBanner = document.getElementById('m-error-banner');
   const errorText = document.getElementById('m-error-text');
+  const lastRunEl = document.getElementById('m-last-run');
   if (inboxLastRun?.error) {
     errorBanner.hidden = false;
     errorText.textContent = `Le chargement a échoué : ${inboxLastRun.error}`;
+    if (lastRunEl) lastRunEl.textContent = '';
   } else {
     errorBanner.hidden = true;
+    if (lastRunEl) {
+      lastRunEl.textContent = inboxLastRun?.at
+        ? 'Boîte chargée ' + relativeTime(new Date(inboxLastRun.at))
+        : 'Jamais chargée';
+    }
   }
 
   renderInbox(inboxCache, new Set(inboxDismissed));
@@ -884,6 +891,12 @@ function renderInbox(cache, dismissed) {
     hint.textContent = 'Aucune conversation dans cette catégorie.';
     return;
   }
+
+  visible.sort((a, b) => {
+    const da = new Date(a.lastMessageDate || 0).getTime();
+    const db = new Date(b.lastMessageDate || 0).getTime();
+    return db - da;
+  });
 
   for (const conv of visible) {
     list.appendChild(renderInboxCard(conv, dismissed, { isArchived }));
