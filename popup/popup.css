@@ -58,6 +58,13 @@ header .meta { font-size: 11px; color: var(--ink-soft); }
 .icon-btn:hover { color: var(--orange); border-color: var(--orange); }
 .icon-btn.small { width: 22px; height: 22px; font-size: 11px; }
 
+.login-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #1f9d55;
+  box-shadow: 0 0 0 3px rgba(31, 157, 85, 0.18);
+  display: inline-block;
+}
+
 /* Banners (login state, errors, …) */
 .banner {
   display: flex; align-items: center; gap: 10px;
@@ -96,13 +103,13 @@ header .meta { font-size: 11px; color: var(--ink-soft); }
   border-bottom-color: var(--orange);
 }
 
-.panel { display: none; padding: 12px 14px 14px; }
+.panel { display: none; padding: 16px 14px 16px; }
 .panel.active { display: block; }
 
-.section { margin-bottom: 12px; }
+.section { margin-bottom: 16px; }
 .section-title {
   font-size: 11px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .04em; color: var(--ink-soft); margin: 0 0 6px;
+  letter-spacing: .04em; color: var(--ink-soft); margin: 0 0 8px;
 }
 
 .row { display: flex; gap: 8px; align-items: center; }
@@ -166,11 +173,12 @@ header .meta { font-size: 11px; color: var(--ink-soft); }
 .prospect-meta {
   display: flex; align-items: center; justify-content: space-between;
   background: var(--bg); border: 1px solid var(--border);
-  border-radius: 8px; padding: 9px 11px; margin-bottom: 10px;
+  border-radius: 8px; padding: 12px 14px; margin-bottom: 12px;
+  gap: 18px;
 }
 .prospect-meta .stat { display: flex; flex-direction: column; }
 .prospect-meta .stat .n {
-  font-size: 18px; font-weight: 700; color: var(--ink); line-height: 1;
+  font-size: 22px; font-weight: 700; color: var(--ink); line-height: 1;
 }
 .prospect-meta .stat .l {
   font-size: 10px; color: var(--ink-soft); text-transform: uppercase;
@@ -246,7 +254,7 @@ header .meta { font-size: 11px; color: var(--ink-soft); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-hr { border: 0; border-top: 1px solid var(--border); margin: 10px 0; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 
 /* Big primary CTA used in the bumper action bar */
 .btn.big { padding: 10px 16px; font-size: 13px; }
@@ -360,15 +368,24 @@ details.section[open] > summary h2.section-title::before {
 }
 .paused-banner a { color: #8a5a00; font-weight: 600; }
 
-/* Prospect card "Contacter" button */
-.card-actions { margin-top: 6px; text-align: right; }
-.card-actions .contact-btn {
+/* Prospect card "Contacter" / "Ignorer" buttons */
+.card-actions {
+  margin-top: 6px; display: flex; justify-content: flex-end; gap: 6px;
+}
+.card-actions .btn {
   font-size: 11px; padding: 3px 8px;
   border: 1px solid var(--border); background: var(--bg);
   border-radius: 6px; cursor: pointer; color: var(--ink-soft);
   transition: all .15s;
 }
 .card-actions .contact-btn:hover { color: var(--orange); border-color: var(--orange); }
+.card-actions .ignore-btn:hover { color: #b00020; border-color: #b00020; }
+
+.ignored-footer {
+  margin-top: 8px; padding: 6px 4px; text-align: center;
+  font-size: 11px; color: var(--ink-soft);
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+}
 
 /* Toast */
 .toast {

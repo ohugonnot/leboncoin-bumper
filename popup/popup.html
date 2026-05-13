@@ -10,11 +10,12 @@
   <header>
     <h1><span class="dot"></span>Booster Leboncoin</h1>
     <div class="header-actions">
+      <span id="login-dot" class="login-dot" title="Connecté à leboncoin" hidden></span>
       <button class="icon-btn" id="open-in-tab" title="Ouvrir dans un onglet (plus grand)">⤢</button>
     </div>
   </header>
 
-  <!-- Login banners (mutually exclusive) -->
+  <!-- Login warning : visible uniquement quand pas connecté -->
   <div class="banner warning" id="login-banner" hidden>
     <span class="banner-icon">⚠️</span>
     <div class="banner-content">
@@ -22,12 +23,6 @@
       <p>Connecte-toi à leboncoin.fr d'abord — l'extension a besoin d'une session active.</p>
     </div>
     <a class="btn primary small" href="https://www.leboncoin.fr/" target="_blank" rel="noopener">Se connecter</a>
-  </div>
-  <div class="banner success" id="login-ok-banner" hidden>
-    <span class="banner-icon">✓</span>
-    <div class="banner-content">
-      <strong>Connecté <span id="login-pseudo"></span></strong>
-    </div>
   </div>
 
   <nav class="tabs">
