@@ -1,14 +1,18 @@
-# Leboncoin Bumper
+# Booster Leboncoin
 
-> Extension Chrome (Manifest V3) qui **republie automatiquement tes annonces leboncoin** chaque semaine et **scrute les demandes tech** correspondant à tes compétences.
+> **Extension Chrome / Edge / Brave** qui **republie automatiquement tes annonces Leboncoin** chaque semaine et **détecte les demandes tech** (développeur, WordPress, automatisation, IA…) auxquelles tu peux répondre comme freelance.
+>
+> 🇫🇷 *Outil pensé pour les freelances français : auto-bump hebdo + veille de prospects + template de réponse en un clic.*
 
 <p align="center">
-  <img src="docs/screenshots/prospect-hero.png" width="480" alt="Onglet Prospect Watch — demandes tech récentes, scorées et dédupliquées">
+  <img src="docs/screenshots/prospect-hero.png" width="480" alt="Booster Leboncoin — onglet Prospects : demandes tech récentes scorées et dédupliquées">
 </p>
 
-[![Tests](https://img.shields.io/badge/tests-18%20passing-success)](#tests)
+[![Tests](https://img.shields.io/badge/tests-23%20passing-success)](#tests)
 [![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 [![Manifest](https://img.shields.io/badge/Chrome-MV3-orange)](manifest.json)
+
+**Mots-clés** : extension Leboncoin · republier annonces automatiquement · bump Leboncoin · veille freelance tech · prospects développeur · WordPress · Symfony · auto-repost · API Leboncoin · Manifest V3
 
 🇬🇧 **English version** below ([#english](#english))
 
@@ -22,7 +26,7 @@ Cette extension le fait pour toi, sur un planning hebdomadaire, **100 % local, s
 
 ## Fonctionnalités
 
-### ↻ Bumper
+### ↻ Republier (Bumper)
 
 - **Récupère tes annonces actives** (titre, description, prix, localité, photos)
 - **Les supprime** via le formulaire de confirmation leboncoin
@@ -64,7 +68,7 @@ Assure-toi d'être **connecté à leboncoin.fr** dans le même profil Chrome ava
 
 ## Utilisation
 
-### Bumper
+### Republier (Bumper)
 
 <p align="center">
   <img src="docs/screenshots/bumper.png" width="480" alt="Onglet Bumper — sélecteur visuel d'annonces + Mode test + planning">
