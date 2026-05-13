@@ -206,10 +206,22 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
 
         // 2) Ad search per keyword
         const adsByKeyword = {};
-        for (const kw of kws) {
+        for (let i = 0; i < kws.length; i++) {
+          const kw = kws[i];
           const items = [];
           let offset = 0;
           for (let page = 0; page < 10; page++) {
+            await chrome.storage.local.set({
+              prospectScanProgress: {
+                kwIndex: i + 1,
+                kwTotal: kws.length,
+                kw,
+                page: page + 1,
+                pageMax: 10,
+                found: items.length,
+                at: Date.now()
+              }
+            });
             let data;
             try {
               // Build dynamic filters from per-profile config
@@ -248,10 +260,51 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
           }
           adsByKeyword[kw] = items;
         }
+        await chrome.storage.local.remove('prospectScanProgress');
         return { adsByKeyword, contactedAdIds };
       }
     });
     return result;
+  } finally {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+/**
+ * Fetch the user's inbox conversations from leboncoin's messaging API.
+ *
+ * Must run via a real leboncoin tab: the Bearer JWT lives in localStorage.luat
+ * and the userId is in cookie lbc_user_id — both unavailable from the SW
+ * origin. The tab is opened in the background and closed after the fetch.
+ *
+ * Conversation shape (real API fields, verified 2026-05):
+ *   conversationId, itemId, subject, partnerName,
+ *   lastMessagePreview, lastMessageDate, unseenCounter
+ *
+ * @returns {Promise<{conversations: object[], at: number}>}
+ */
+export async function fetchInboxViaTab() {
+  const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
+  try {
+    await waitForTabLoad(tab.id);
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: async () => {
+        const jwt = localStorage.getItem('luat');
+        const userIdCookie = document.cookie.split(';').map(s => s.trim())
+          .find(s => s.startsWith('lbc_user_id='));
+        const userId = userIdCookie ? decodeURIComponent(userIdCookie.split('=')[1]) : null;
+        if (!jwt || !userId) throw new Error('Not authenticated — luat or lbc_user_id missing');
+        const r = await fetch(
+          `https://api.leboncoin.fr/messaging/proxy/api/v1/hal/${userId}/conversations?presenceStatus=true`,
+          { headers: { authorization: `Bearer ${jwt}`, accept: 'application/hal+json' }, credentials: 'include' }
+        );
+        if (!r.ok) throw new Error(`Inbox API returned ${r.status}`);
+        const d = await r.json();
+        return d?._embedded?.conversations || [];
+      }
+    });
+    return { conversations: result || [], at: Date.now() };
   } finally {
     await chrome.tabs.remove(tab.id).catch(() => {});
   }

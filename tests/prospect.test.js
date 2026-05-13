@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   scoreAd, ageDays, buildSearchPayload, buildEntry,
   sortEntries, runProspectScan, formatReplyTemplate,
-  parseProfileKeywords, explainScore,
+  parseProfileKeywords, explainScore, groupByOwner,
   STRONG_SIGNALS, MODERATE_SIGNALS, NEG_SIGNALS, DEMAND_PREFIX, DEMAND_HINTS
 } from '../prospect.js';
 import {
@@ -325,4 +325,51 @@ test('scoreAd: keyword-match skips too-short keywords (<2 chars)', () => {
   const s = scoreAd('php is the best', 'long enough body php php php', ['p', 'php']);
   // 'p' is too short (1 char) → filtered. 'php' in title → +2. No demand. Total 2.
   assert.equal(s, 2);
+});
+
+// ─── groupByOwner ─────────────────────────────────────────────────────────
+
+function makeEntry(list_id, owner_id = '', owner_name = '') {
+  return { list_id, owner_id, owner_name, owner_type: '', score: 5, age_days: 1, is_new: true };
+}
+
+test('groupByOwner: 3 entries same owner_id → 1 group with 2 others', () => {
+  const entries = [makeEntry('1', 'A'), makeEntry('2', 'A'), makeEntry('3', 'A')];
+  const groups = groupByOwner(entries);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].primary.list_id, '1');
+  assert.deepEqual(groups[0].others.map(e => e.list_id), ['2', '3']);
+});
+
+test('groupByOwner: entries without owner_id stay individual', () => {
+  const entries = [makeEntry('1', ''), makeEntry('2', ''), makeEntry('3', '')];
+  const groups = groupByOwner(entries);
+  assert.equal(groups.length, 3);
+  assert.ok(groups.every(g => g.others.length === 0));
+});
+
+test('groupByOwner: mix of grouped and solo entries', () => {
+  const entries = [
+    makeEntry('1', 'A'),
+    makeEntry('2', 'B'),
+    makeEntry('3', 'A'),
+    makeEntry('4', '')
+  ];
+  const groups = groupByOwner(entries);
+  assert.equal(groups.length, 3);
+  assert.equal(groups[0].ownerId, 'A');
+  assert.equal(groups[0].others.length, 1);
+  assert.equal(groups[1].ownerId, 'B');
+  assert.equal(groups[1].others.length, 0);
+  assert.equal(groups[2].ownerId, '');  // solo anonymous
+  assert.equal(groups[2].others.length, 0);
+});
+
+test('groupByOwner: preserves primary order — [A1, B1, A2] → primaries [A1, B1]', () => {
+  const entries = [makeEntry('A1', 'A'), makeEntry('B1', 'B'), makeEntry('A2', 'A')];
+  const groups = groupByOwner(entries);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].primary.list_id, 'A1');
+  assert.equal(groups[0].others[0].list_id, 'A2');
+  assert.equal(groups[1].primary.list_id, 'B1');
 });

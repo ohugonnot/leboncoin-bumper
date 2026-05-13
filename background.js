@@ -2,8 +2,9 @@
 //   - lbc-weekly-bump: deletes & reposts the user's own listings.
 //   - lbc-weekly-prospect: scans leboncoin demands matching the user's tech profile.
 
-import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm } from './orchestrator.js';
+import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm, fetchInboxViaTab } from './orchestrator.js';
 import { processRawAds, markResultsSeen, DEFAULT_KEYWORDS } from './prospect.js';
+import { classifyConversations } from './messaging.js';
 
 const BUMP_ALARM = 'lbc-weekly-bump';
 const PROSPECT_ALARM = 'lbc-weekly-prospect';
@@ -126,6 +127,27 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse({ ok: true });
     } else if (msg.type === 'PROFILE_SET_ACTIVE') {
       await chrome.storage.local.set({ activeProfileId: msg.id });
+      sendResponse({ ok: true });
+    } else if (msg.type === 'INBOX_REFRESH') {
+      try {
+        const { conversations, at } = await fetchInboxViaTab();
+        const classified = classifyConversations(conversations);
+        await chrome.storage.local.set({
+          inboxCache: classified,
+          inboxLastRun: { at, error: null }
+        });
+        sendResponse({ ok: true, result: classified });
+      } catch (e) {
+        await chrome.storage.local.set({
+          inboxLastRun: { at: Date.now(), error: String(e?.message || e) }
+        });
+        sendResponse({ ok: false, error: e.message });
+      }
+    } else if (msg.type === 'INBOX_DISMISS') {
+      const { inboxDismissed = [] } = await chrome.storage.local.get('inboxDismissed');
+      const next = new Set(inboxDismissed);
+      next.add(msg.convId);
+      await chrome.storage.local.set({ inboxDismissed: [...next].slice(-2000) });
       sendResponse({ ok: true });
     }
   })();
