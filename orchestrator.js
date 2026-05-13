@@ -164,15 +164,15 @@ export async function checkLoginStatus() {
  *
  * @returns {Promise<{adsByKeyword: Object, contactedAdIds: string[]}>}
  */
-export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand') {
+export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand', apiFilters = {}) {
   const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
   try {
     await waitForTabLoad(tab.id);
     const adTypes = adType === 'both' ? ['demand', 'offer'] : [adType];
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      args: [keywords, maxAgeDays, adTypes],
-      func: async (kws, maxAge, adTypesEnum) => {
+      args: [keywords, maxAgeDays, adTypes, apiFilters],
+      func: async (kws, maxAge, adTypesEnum, extra) => {
         const API_URL = 'https://api.leboncoin.fr/finder/search';
         const API_KEY = 'ba0c2dad52b3ec';
         const ageDays = (iso) => {
@@ -212,13 +212,25 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
           for (let page = 0; page < 10; page++) {
             let data;
             try {
+              // Build dynamic filters from per-profile config
+              const filters = { enums: { ad_type: adTypesEnum }, keywords: { text: kw } };
+              if (extra.priceMin != null || extra.priceMax != null) {
+                const price = {};
+                if (extra.priceMin != null) price.min = Number(extra.priceMin);
+                if (extra.priceMax != null) price.max = Number(extra.priceMax);
+                filters.ranges = { price };
+              }
+              if (Array.isArray(extra.departments) && extra.departments.length) {
+                filters.location = { departments: extra.departments };
+              }
               const res = await fetch(API_URL, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', 'api_key': API_KEY },
                 credentials: 'include',
                 body: JSON.stringify({
-                  sort_by: 'time', sort_order: 'desc', limit: 100, offset,
-                  filters: { enums: { ad_type: adTypesEnum }, keywords: { text: kw } }
+                  sort_by: extra.sortBy || 'time',
+                  sort_order: extra.sortOrder || 'desc',
+                  limit: 100, offset, filters
                 })
               });
               if (!res.ok) break;

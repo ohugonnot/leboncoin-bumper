@@ -180,6 +180,33 @@
         </div>
       </div>
 
+      <h3 class="section-title" style="margin-top: 14px;">Filtres leboncoin (optionnels)</h3>
+      <div class="row" style="margin-top: 4px;">
+        <div class="field" title="Prix minimum (€). Laisse vide pour pas de minimum.">
+          <label>Prix min (€)</label>
+          <input type="number" id="p-priceMin" min="0" placeholder="—">
+        </div>
+        <div class="field" title="Prix maximum (€). Laisse vide pour pas de maximum.">
+          <label>Prix max (€)</label>
+          <input type="number" id="p-priceMax" min="0" placeholder="—">
+        </div>
+      </div>
+      <div class="row" style="margin-top: 6px;">
+        <div class="field" style="flex: 2;" title="Codes département (1-95) séparés par virgule. Ex: 25,70,90 pour la zone Doubs/Haute-Saône/Territoire-de-Belfort. Laisse vide pour toute la France.">
+          <label>Départements (codes)</label>
+          <input type="text" id="p-departments" placeholder="ex: 25, 70, 90  (vide = France entière)">
+        </div>
+        <div class="field" title="Tri appliqué côté leboncoin.">
+          <label>Tri</label>
+          <select id="p-sortBy">
+            <option value="time-desc">Plus récent</option>
+            <option value="time-asc">Plus ancien</option>
+            <option value="price-asc">Prix croissant</option>
+            <option value="price-desc">Prix décroissant</option>
+          </select>
+        </div>
+      </div>
+
       <label class="toggle" style="margin-top: 10px;">
         <input type="checkbox" id="p-notifyOnNew">
         <span class="label">🔔 Notifications desktop</span>
