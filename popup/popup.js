@@ -268,7 +268,8 @@ async function loadProspect() {
   const s = await chrome.storage.local.get([
     'prospectProfiles', 'activeProfileId', 'prospectGlobalSettings',
     'prospectResultsByProfile', 'prospectLastRunByProfile',
-    'prospectSeenIdsByProfile', 'prospectIgnoredIdsByProfile'
+    'prospectSeenIdsByProfile', 'prospectIgnoredIdsByProfile',
+    'prospectContactedLocal'
   ]);
   const profiles = s.prospectProfiles || [];
   if (!profiles.length) return;  // migration not run yet
@@ -295,8 +296,12 @@ async function loadProspect() {
   p.keywords.value = (profile.keywords || []).join('\n');
   p.replyTemplate.value = profile.replyTemplate || DEFAULT_REPLY_TEMPLATE;
 
-  // Render results for active profile
-  const results = s.prospectResultsByProfile?.[profile.id] || [];
+  // Render results for active profile, applying local "contacted" overlay
+  const rawResults = s.prospectResultsByProfile?.[profile.id] || [];
+  const localContacted = new Set(s.prospectContactedLocal || []);
+  const results = localContacted.size
+    ? rawResults.map(r => localContacted.has(r.list_id) ? { ...r, already_contacted: true } : r)
+    : rawResults;
   const lastRun = s.prospectLastRunByProfile?.[profile.id] || null;
   const seen = new Set(s.prospectSeenIdsByProfile?.[profile.id] || []);
   const ignored = new Set(s.prospectIgnoredIdsByProfile?.[profile.id] || []);
@@ -379,16 +384,24 @@ async function onRestoreIgnored() {
 }
 
 async function onContact(prospect) {
-  const { prospectSettings = {} } = await chrome.storage.local.get('prospectSettings');
-  const template = prospectSettings.replyTemplate || DEFAULT_REPLY_TEMPLATE;
+  const { prospectProfiles = [], activeProfileId, prospectContactedLocal = [] } =
+    await chrome.storage.local.get(['prospectProfiles', 'activeProfileId', 'prospectContactedLocal']);
+  const profile = prospectProfiles.find(x => x.id === activeProfileId) || prospectProfiles[0];
+  const template = profile?.replyTemplate || DEFAULT_REPLY_TEMPLATE;
   const filled = formatReplyTemplate(template, prospect);
-  // Pass the filled message to background, which opens /reply/{id} and injects it.
   await chrome.runtime.sendMessage({
     type: 'OPEN_REPLY_FORM',
     listId: prospect.list_id,
     message: filled
   });
-  showToast('Formulaire de réponse ouvert — vérifie et clique Envoyer');
+  // Memorize locally so the prospect stays tagged "déjà contacté" even if
+  // the leboncoin conversation gets deleted on their side. Shared across
+  // profiles : a contact is a contact regardless of which veille surfaced it.
+  const nextSet = new Set(prospectContactedLocal);
+  nextSet.add(prospect.list_id);
+  await chrome.storage.local.set({ prospectContactedLocal: [...nextSet].slice(-5000) });
+  showToast('Form ouvert + marqué comme contacté');
+  await loadProspect();
 }
 
 let toastTimer = null;

@@ -137,10 +137,12 @@ async function doProspectScan(trigger) {
     prospectGlobalSettings = {},
     prospectSeenIdsByProfile = {},
     prospectResultsByProfile = {},
-    prospectLastRunByProfile = {}
+    prospectLastRunByProfile = {},
+    prospectContactedLocal = []
   } = await chrome.storage.local.get([
     'prospectProfiles', 'activeProfileId', 'prospectGlobalSettings',
-    'prospectSeenIdsByProfile', 'prospectResultsByProfile', 'prospectLastRunByProfile'
+    'prospectSeenIdsByProfile', 'prospectResultsByProfile', 'prospectLastRunByProfile',
+    'prospectContactedLocal'
   ]);
   const profile = prospectProfiles.find(p => p.id === activeProfileId) || prospectProfiles[0];
   if (!profile) throw new Error('No prospect profile found');
@@ -150,9 +152,12 @@ async function doProspectScan(trigger) {
   const minScore = profile.minScore || 5;
   // Fetch routed through a leboncoin tab — direct SW fetch is 403'd by DataDome.
   const { adsByKeyword, contactedAdIds = [] } = await fetchAdsViaTab(keywords, maxAgeDays);
+  // Merge live conversations (API) with the local memory of past contacts
+  // (which survives deletion of conversations on leboncoin's side).
+  const allContacted = new Set([...contactedAdIds, ...prospectContactedLocal]);
   const out = processRawAds({
     adsByKeyword, maxAgeDays, minScore,
-    seenIds: seen, contactedIds: new Set(contactedAdIds)
+    seenIds: seen, contactedIds: allContacted
   });
   await chrome.storage.local.set({
     prospectResultsByProfile: { ...prospectResultsByProfile, [profile.id]: out.results },
