@@ -156,6 +156,67 @@ export async function checkLoginStatus() {
   return { loggedIn: true, pseudo: myListings.pseudo || null, stale };
 }
 
+/**
+ * Fetch raw ads from /finder/search for each keyword, running the fetch loop
+ * inside a real leboncoin tab. Required because DataDome rejects fetches
+ * coming from the `chrome-extension://` origin with a 403 + captcha challenge.
+ *
+ * Returns a map { keyword → ad[] } that processRawAds() then scores/dedups.
+ */
+export async function fetchAdsViaTab(keywords, maxAgeDays = 30) {
+  const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
+  try {
+    await waitForTabLoad(tab.id);
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      args: [keywords, maxAgeDays],
+      func: async (kws, maxAge) => {
+        const API_URL = 'https://api.leboncoin.fr/finder/search';
+        const API_KEY = 'ba0c2dad52b3ec';
+        const ageDays = (iso) => {
+          if (!iso) return null;
+          const d = new Date(String(iso).replace(' ', 'T'));
+          return isNaN(d.getTime()) ? null : (Date.now() - d.getTime()) / 86400000;
+        };
+        const out = {};
+        for (const kw of kws) {
+          const items = [];
+          let offset = 0;
+          for (let page = 0; page < 10; page++) {
+            let data;
+            try {
+              const res = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', 'api_key': API_KEY },
+                credentials: 'include',
+                body: JSON.stringify({
+                  sort_by: 'time', sort_order: 'desc', limit: 100, offset,
+                  filters: { enums: { ad_type: ['demand'] }, keywords: { text: kw } }
+                })
+              });
+              if (!res.ok) break;
+              data = await res.json();
+            } catch { break; }
+            const ads = data?.ads ?? [];
+            if (!ads.length) break;
+            items.push(...ads);
+            const oldest = ageDays(ads[ads.length - 1]?.first_publication_date);
+            if (oldest !== null && oldest > maxAge) break;
+            offset += 100;
+            if (offset >= (data.total ?? 0)) break;
+            await new Promise(r => setTimeout(r, 150));
+          }
+          out[kw] = items;
+        }
+        return out;
+      }
+    });
+    return result;
+  } finally {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
 async function scrapeEditPage(tabId, adId) {
   await navigate(tabId, `${LBC}/annonce/${adId}/editer`);
   await waitForSelector(tabId, 'input[name="subject"]');
