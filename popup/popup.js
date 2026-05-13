@@ -356,9 +356,10 @@ function renderProspects(results, lastRun, seenSet, ignoredSet = new Set()) {
       <div class="card-meta">
         <span class="loc">${escapeHtml(r.location)}</span>
         <span class="age">${r.age_days}j</span>
+        ${r.price ? `<span class="price">${r.price} €</span>` : ''}
         <span class="kw">${escapeHtml(r.kw_hit)}</span>
       </div>
-      <div class="card-body">${escapeHtml((r.body || '').slice(0, 200))}</div>
+      <div class="card-body">${escapeHtml((r.body || '').slice(0, 400))}</div>
       <div class="card-actions">
         <button class="btn ghost small ignore-btn" data-id="${escapeAttr(r.list_id)}" title="Masquer définitivement (ne reviendra pas dans les prochains scans)">✗ Ignorer</button>
         <button class="btn ghost small contact-btn" data-id="${escapeAttr(r.list_id)}" ${r.already_contacted ? 'title="Tu as déjà contacté — ouvre /reply pour relancer"' : ''}>✉ ${r.already_contacted ? 'Relancer' : 'Contacter'}</button>
