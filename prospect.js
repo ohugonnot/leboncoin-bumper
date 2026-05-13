@@ -201,7 +201,7 @@ export async function searchKeyword(keyword, { maxAgeDays = 30, fetchFn = (typeo
     if (oldestAge !== null && oldestAge > maxAgeDays) break;
     offset += 100;
     if (offset >= (data.total ?? 0)) break;
-    await new Promise(r => setTimeout(r, 150));
+    await new Promise(r => setTimeout(r, 250));
   }
   return items;
 }
@@ -319,7 +319,6 @@ export function processRawAds({
     for (const ad of ads || []) {
       const lid = String(ad.list_id || '');
       if (!lid) continue;
-      // Post-filter : owner type
       if (ownerType !== 'all' && ad.owner?.type !== ownerType) continue;
       // Post-filter : shipping available (attribute "shippable" === "true")
       if (shippableOnly) {

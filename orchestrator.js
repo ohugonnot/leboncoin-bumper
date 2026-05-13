@@ -2,9 +2,12 @@
 // Critical rule, learned during E2E mapping: NEVER navigate back in the deposit wizard
 // after a step has been submitted. Going back and re-submitting creates a duplicate listing.
 
+import { decodeJwt, buildMyAdsPayload, normalizeAd } from './my-ads.js';
+
 const LBC = 'https://www.leboncoin.fr';
 const LISTINGS_URL = `${LBC}/compte/part/mes-annonces`;
 const DEPOSIT_URL = `${LBC}/deposer-une-annonce`;
+const DASHBOARD_API = 'https://api.leboncoin.fr/api/dashboard/v1/search';
 
 export async function runCycle({ trigger }) {
   const { settings } = await chrome.storage.local.get('settings');
@@ -96,8 +99,6 @@ async function persistCycleResult({ trigger, count, success, failed }) {
   await chrome.storage.local.set({ lastBumpRun: lastRun, bumpHistory: nextHistory });
 }
 
-// ---- Scrape ---------------------------------------------------------------
-
 /**
  * Scrape the listings on the given tab. The tab MUST already be on /mes-annonces
  * and fully loaded — the caller is responsible for navigation + waiting.
@@ -169,6 +170,75 @@ export async function listUserAds() {
 }
 
 /**
+ * Fetch all of the user's own listings via the private dashboard API.
+ * Must run via a real leboncoin tab — same reason as fetchInboxViaTab (DataDome).
+ *
+ * Paginates automatically until all ads are fetched (offset >= total).
+ *
+ * @returns {Promise<{listings: object[], pseudo: string|null, fetchedAt: string}>}
+ */
+export async function fetchMyAdsViaApi() {
+  const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
+  try {
+    await waitForTabLoad(tab.id);
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      args: [DASHBOARD_API],
+      func: async (apiUrl) => {
+        const jwt = localStorage.getItem('luat');
+        if (!jwt) throw new Error('luat absent du localStorage — utilisateur non connecté');
+
+        // Decode JWT payload (no signature verification needed).
+        const parts = jwt.split('.');
+        if (parts.length < 2) throw new Error('JWT malformé');
+        const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const payload = JSON.parse(atob(b64));
+        const userId = payload.account_id;
+        if (!userId) throw new Error('account_id absent du JWT');
+
+        const headers = {
+          'Authorization': `Bearer ${jwt}`,
+          'content-type': 'application/json'
+        };
+
+        let allAds = [];
+        let offset = 0;
+        const limit = 100;
+        let total = null;
+
+        do {
+          const body = JSON.stringify({
+            context: 'default',
+            filters: { owner: { user_id: userId } },
+            limit,
+            offset,
+            sort_by: 'time',
+            sort_order: 'desc',
+            include_inactive: true,
+            include_draft: true
+          });
+          const res = await fetch(apiUrl, { method: 'POST', headers, body });
+          if (!res.ok) throw new Error(`dashboard API returned ${res.status}`);
+          const data = await res.json();
+          if (total === null) total = data.total ?? 0;
+          allAds = allAds.concat(data.ads ?? []);
+          offset += limit;
+          if (offset < total) await new Promise(r => setTimeout(r, 250));
+        } while (offset < total);
+
+        // Pseudo from the owner name on the first ad (consistent across ads).
+        const pseudo = allAds[0]?.owner?.name ?? null;
+        return { rawAds: allAds, pseudo };
+      }
+    });
+    const listings = (result.rawAds || []).map(normalizeAd);
+    return { listings, pseudo: result.pseudo ?? null, fetchedAt: new Date().toISOString() };
+  } finally {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+/**
  * Login state derived from the cached listings fetch.
  *
  * The previous strategy (direct fetch from the service worker) was blocked by
@@ -234,7 +304,6 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
           }
         } catch { /* non-fatal — just won't tag */ }
 
-        // 2) Ad search per keyword
         const adsByKeyword = {};
         for (let i = 0; i < kws.length; i++) {
           const kw = kws[i];
@@ -286,7 +355,7 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
             if (oldest !== null && oldest > maxAge) break;
             offset += 100;
             if (offset >= (data.total ?? 0)) break;
-            await new Promise(r => setTimeout(r, 150));
+            await new Promise(r => setTimeout(r, 250));
           }
           adsByKeyword[kw] = items;
         }
@@ -325,13 +394,30 @@ export async function fetchInboxViaTab() {
           .find(s => s.startsWith('lbc_user_id='));
         const userId = userIdCookie ? decodeURIComponent(userIdCookie.split('=')[1]) : null;
         if (!jwt || !userId) throw new Error('Not authenticated — luat or lbc_user_id missing');
-        const r = await fetch(
-          `https://api.leboncoin.fr/messaging/proxy/api/v1/hal/${userId}/conversations?presenceStatus=true`,
-          { headers: { authorization: `Bearer ${jwt}`, accept: 'application/hal+json' }, credentials: 'include' }
-        );
-        if (!r.ok) throw new Error(`Inbox API returned ${r.status}`);
-        const d = await r.json();
-        return d?._embedded?.conversations || [];
+
+        const BASE = 'https://api.leboncoin.fr';
+        const headers = { authorization: `Bearer ${jwt}`, accept: 'application/hal+json' };
+        const MAX_PAGES = 50;
+
+        let nextUrl = `${BASE}/messaging/proxy/api/v1/hal/${userId}/conversations?presenceStatus=true`;
+        const allConversations = [];
+        let pages = 0;
+
+        while (nextUrl && pages < MAX_PAGES) {
+          const r = await fetch(nextUrl, { headers, credentials: 'include' });
+          if (!r.ok) throw new Error(`Inbox API returned ${r.status}`);
+          const d = await r.json();
+          allConversations.push(...(d?._embedded?.conversations || []));
+          pages++;
+          // _links.next is null or absent on the last page
+          const rawNext = d?._links?.next?.href ?? null;
+          if (!rawNext) break;
+          // Prefix relative paths (e.g. /messaging/proxy/...?continuationToken=...)
+          nextUrl = rawNext.startsWith('http') ? rawNext : BASE + rawNext;
+          if (pages < MAX_PAGES) await new Promise(r => setTimeout(r, 250));
+        }
+
+        return allConversations;
       }
     });
     return { conversations: result || [], at: Date.now() };
@@ -395,8 +481,6 @@ async function scrapeEditPage(tabId, adId) {
   return { adId, ...result };
 }
 
-// ---- Delete ---------------------------------------------------------------
-
 async function deleteListing(tabId, adId) {
   await navigate(tabId, LISTINGS_URL);
   await waitForSelector(tabId, 'li[data-qa-id="ad_item_container"]');
@@ -430,8 +514,6 @@ async function deleteListing(tabId, adId) {
   // Confirmation page shows "demande de suppression a bien été prise en compte"
   await waitForText(tabId, 'a bien été prise en compte', 10000);
 }
-
-// ---- Repost (linear, never go back) ---------------------------------------
 
 async function repostListing(tabId, data) {
   await navigate(tabId, DEPOSIT_URL);
@@ -563,8 +645,6 @@ async function uploadPhotos(tabId, photoUrls) {
     }
   });
 }
-
-// ---- Helpers --------------------------------------------------------------
 
 async function navigate(tabId, url) {
   await chrome.tabs.update(tabId, { url });
