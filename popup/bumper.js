@@ -297,16 +297,6 @@ function renderListings(stored, selectedIds, listingEdits = {}) {
     `;
     row.appendChild(body);
 
-    const dupBtn = document.createElement('button');
-    dupBtn.className = 'listing-duplicate';
-    dupBtn.textContent = '📋 Dupliquer';
-    dupBtn.title = 'Copie titre + prix + description dans le presse-papier et ouvre le formulaire de dépôt leboncoin.';
-    dupBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      handleDuplicate(it);
-    });
-    row.appendChild(dupBtn);
-
     const editBtn = document.createElement('button');
     editBtn.className = 'listing-edit-btn';
     editBtn.textContent = '✏️ Éditer';
@@ -513,31 +503,6 @@ async function handleBackupImportFile(file) {
       settings: { ...settings, onlyAdIds: prevOnlyAdIds }
     });
   }
-}
-
-// Duplicate : option (a) — copie titre + prix + description dans le presse-papier
-// et ouvre /deposer-une-annonce dans un nouvel onglet.
-// Choix retenu car repostListing() dans orchestrator.js exige une phase scrape live
-// (scrapeEditPage) pour obtenir les photos — données absentes de myListings qui ne
-// stocke que titre/thumbnail/statut. Brancher repostListing directement demanderait
-// soit un nouveau cycle de scrape, soit une refonte du stockage. L'option (a) est
-// sans risque et utilisable immédiatement.
-async function handleDuplicate(listing) {
-  const lines = [
-    listing.title || '',
-    listing.price ? `Prix : ${listing.price}` : '',
-    listing.body || listing.description || ''
-  ].filter(Boolean);
-  const text = lines.join('\n\n');
-
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    // Presse-papier refusé (ex: focus perdu) — on ouvre quand même l'onglet.
-  }
-
-  await chrome.tabs.create({ url: 'https://www.leboncoin.fr/deposer-une-annonce', active: true });
-  showBackupStatus('📋 Données copiées — colle dans le formulaire leboncoin.');
 }
 
 async function saveBumper() {
