@@ -41,8 +41,16 @@ Tout tourne dans ton navigateur. **Aucune donnée ne quitte ta machine.** Pas de
 - **Sélecteur visuel** : coche les annonces à bumper directement dans la liste, avec miniatures + statut
 - **Annonces "en pause" détectées et ignorées** automatiquement
 - **Planning hebdomadaire** précis (jour + heure + jitter optionnel pour humaniser)
+- **🤖 Smart Bump** : planifie au prochain créneau de forte affluence selon la catégorie de tes annonces (services/B2B en journée, loisirs/tech en soirée, immo/véhicules le soir et weekend)
 - **Mode test (dry-run)** pour prévisualiser sans rien toucher
 - **Confirmation explicite** avant chaque cycle réel
+
+### 💬 Messages — filtre anti-scam + classement boîte de réception
+
+- **Classification automatique** de chaque message en 4 catégories : 🚨 Scam · 💬 Lead · ❓ Question · 🗑 Spam
+- **9 patterns d'arnaque détectés** : mandat-cash / Western Union, QR-code, faux transporteur, WhatsApp/Telegram hors plateforme, téléphone étranger, liens externes, PayPal Friends, code SMS, urgence + voyage
+- **Filtres + recherche** dans la boîte de réception, badges visuels par catégorie
+- **Archives locales** : "Archiver" un message le cache de l'extension sans rien supprimer côté Leboncoin (restaurable)
 
 ### 🎯 Prospects — veille intelligente
 
@@ -163,6 +171,7 @@ Projet **non affilié à Leboncoin SAS**. Fourni "tel quel" sous licence MIT —
 
 ## Roadmap
 
+### Fait
 - [x] Multi-veilles isolées avec profils nommés
 - [x] Scoring transparent avec poids et breakdown au survol
 - [x] Filtres Leboncoin avancés (prix, dépts, vendeur, livraison)
@@ -170,7 +179,21 @@ Projet **non affilié à Leboncoin SAS**. Fourni "tel quel" sous licence MIT —
 - [x] Contacter → ouvre la messagerie pré-remplie
 - [x] Détection des conversations déjà entamées
 - [x] Indicateur de connexion compact
-- [ ] Historique persistant des cycles de bump
+- [x] Historique persistant des cycles de bump
+- [x] Boîte de réception avec filtre anti-scam (9 patterns) et classement en 4 catégories
+- [x] Smart Bump — planning au prochain créneau de pic selon la catégorie
+- [x] Backup / clone d'annonces (export JSON local + restauration / duplication 1 clic)
+
+### Suggestions à venir — selon demandes utilisateur
+
+Tu utilises l'extension et l'une de ces features te manque ? **Ouvre une issue** sur le repo et elle remonte dans la file.
+
+- [ ] **A/B test titre / photo / prix** — tracker vues & favoris avant/après changement, suggérer la variante gagnante
+- [ ] **Détection annonce à risque** — lint pré-publication : mots interdits, liens externes, photos sans watermark, catégorie incohérente
+- [ ] **Relance des intéressés sur baisse de prix** — message groupé aux contacts précédents quand tu baisses le prix d'une annonce
+- [ ] **Map des prospects** — carte des leads non contactés (utile artisans / déménageurs / services locaux)
+- [ ] **Suivi CA & seuils micro-BIC** — tracker CA cumulé LBC vs seuils fiscaux (auto-entrepreneurs)
+- [ ] **Détection doublons / clonage** — alerter si quelqu'un copie une de tes annonces
 - [ ] Statut par annonce (✓ bumpée / ⏸ skipped / ✗ failed) dans un dashboard
 - [ ] Vue inline du corps d'un prospect (sans quitter le popup)
 - [ ] Export CSV des prospects
