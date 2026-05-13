@@ -352,3 +352,25 @@ details.section[open] > summary h2.section-title::before {
 .listing.paused { opacity: 0.55; cursor: not-allowed; }
 .listing.paused:hover { border-color: var(--border); }
 .listing.paused input[type="checkbox"] { cursor: not-allowed; }
+
+/* Prospect card "Contacter" button */
+.card-actions { margin-top: 6px; text-align: right; }
+.card-actions .contact-btn {
+  font-size: 11px; padding: 3px 8px;
+  border: 1px solid var(--border); background: var(--bg);
+  border-radius: 6px; cursor: pointer; color: var(--ink-soft);
+  transition: all .15s;
+}
+.card-actions .contact-btn:hover { color: var(--orange); border-color: var(--orange); }
+
+/* Toast */
+.toast {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px);
+  background: var(--ink); color: var(--bg);
+  padding: 8px 14px; border-radius: 8px;
+  font-size: 12px; box-shadow: var(--shadow);
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s, transform .2s;
+  z-index: 100;
+}
+.toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }

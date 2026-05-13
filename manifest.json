@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Leboncoin Bumper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Republie automatiquement tes annonces leboncoin chaque semaine + veille passive sur les demandes tech récentes.",
   "permissions": [
     "storage",
     "alarms",
     "scripting",
-    "tabs"
+    "tabs",
+    "notifications"
   ],
   "host_permissions": [
     "https://www.leboncoin.fr/*",

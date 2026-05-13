@@ -44,6 +44,7 @@ const b = {
   dayOfWeek: document.getElementById('b-dayOfWeek'),
   hour: document.getElementById('b-hour'),
   minute: document.getElementById('b-minute'),
+  jitterMinutes: document.getElementById('b-jitterMinutes'),
   runNow: document.getElementById('b-runNow'),
   clearLog: document.getElementById('b-clearLog'),
   log: document.getElementById('b-log'),
@@ -59,6 +60,7 @@ async function loadBumper() {
   b.dayOfWeek.value = settings.dayOfWeek ?? 1;
   b.hour.value = settings.hour ?? 9;
   b.minute.value = settings.minute ?? 0;
+  b.jitterMinutes.value = settings.jitterMinutes ?? 60;
   renderLog(log);
   renderListings(myListings, new Set(settings.onlyAdIds || []));
   updateActionHint();
@@ -173,13 +175,14 @@ async function saveBumper() {
     dryRun: b.dryRun.checked,
     dayOfWeek: +b.dayOfWeek.value,
     hour: +b.hour.value,
-    minute: +b.minute.value
+    minute: +b.minute.value,
+    jitterMinutes: +b.jitterMinutes.value
   };
   await chrome.storage.local.set({ settings: next });
   await chrome.runtime.sendMessage({ type: 'RESCHEDULE' });
 }
 
-[b.enabled, b.dryRun, b.dayOfWeek, b.hour, b.minute].forEach(el => {
+[b.enabled, b.dryRun, b.dayOfWeek, b.hour, b.minute, b.jitterMinutes].forEach(el => {
   el.addEventListener('change', () => { saveBumper(); updateActionHint(); });
   el.addEventListener('blur', saveBumper);
 });
@@ -228,6 +231,8 @@ b.refreshListings.addEventListener('click', async () => {
 });
 
 // ─── Prospect panel ────────────────────────────────────────────────────────
+import { DEFAULT_REPLY_TEMPLATE, formatReplyTemplate } from '../prospect.js';
+
 const p = {
   enabled: document.getElementById('p-enabled'),
   dayOfWeek: document.getElementById('p-dayOfWeek'),
@@ -235,6 +240,9 @@ const p = {
   minScore: document.getElementById('p-minScore'),
   maxAgeDays: document.getElementById('p-maxAgeDays'),
   keywords: document.getElementById('p-keywords'),
+  notifyOnNew: document.getElementById('p-notifyOnNew'),
+  notifyMinScore: document.getElementById('p-notifyMinScore'),
+  replyTemplate: document.getElementById('p-replyTemplate'),
   scan: document.getElementById('p-scan'),
   markSeen: document.getElementById('p-mark-seen'),
   list: document.getElementById('p-list'),
@@ -252,6 +260,9 @@ async function loadProspect() {
   p.minScore.value = prospectSettings.minScore ?? 5;
   p.maxAgeDays.value = prospectSettings.maxAgeDays ?? 30;
   p.keywords.value = (prospectSettings.keywords || []).join('\n');
+  p.notifyOnNew.checked = prospectSettings.notifyOnNew !== false;
+  p.notifyMinScore.value = prospectSettings.notifyMinScore ?? 7;
+  p.replyTemplate.value = prospectSettings.replyTemplate ?? DEFAULT_REPLY_TEMPLATE;
   renderProspects(prospectResults, prospectLastRun, new Set(prospectSeenIds));
 }
 
@@ -275,7 +286,7 @@ function renderProspects(results, lastRun, seenSet) {
       <div class="card-top">
         <a class="card-title" href="${escapeAttr(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.subject)}</a>
         ${isNew ? '<span class="badge new">NEW</span>' : ''}
-        <span class="badge score">${r.score}</span>
+        <span class="badge score" title="Score de pertinence">★ ${r.score}</span>
       </div>
       <div class="card-meta">
         <span class="loc">${escapeHtml(r.location)}</span>
@@ -283,9 +294,41 @@ function renderProspects(results, lastRun, seenSet) {
         <span class="kw">${escapeHtml(r.kw_hit)}</span>
       </div>
       <div class="card-body">${escapeHtml((r.body || '').slice(0, 200))}</div>
+      <div class="card-actions">
+        <button class="btn ghost small contact-btn" data-id="${escapeAttr(r.list_id)}">✉ Contacter</button>
+      </div>
     `;
+    card.querySelector('.contact-btn').addEventListener('click', () => onContact(r));
     p.list.appendChild(card);
   }
+}
+
+async function onContact(prospect) {
+  const { prospectSettings = {} } = await chrome.storage.local.get('prospectSettings');
+  const template = prospectSettings.replyTemplate || DEFAULT_REPLY_TEMPLATE;
+  const filled = formatReplyTemplate(template, prospect);
+  try {
+    await navigator.clipboard.writeText(filled);
+    showToast('Template copié dans le presse-papier');
+  } catch {
+    showToast('Impossible de copier — vérifie les permissions du presse-papier');
+  }
+  if (prospect.url) chrome.tabs.create({ url: prospect.url });
+}
+
+let toastTimer = null;
+function showToast(msg) {
+  let toast = document.getElementById('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    toast.className = 'toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.classList.add('visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('visible'), 2200);
 }
 
 async function saveProspect() {
@@ -296,12 +339,15 @@ async function saveProspect() {
     minute: 0,
     minScore: +p.minScore.value,
     maxAgeDays: +p.maxAgeDays.value,
-    keywords: p.keywords.value.split('\n').map(s => s.trim()).filter(Boolean)
+    keywords: p.keywords.value.split('\n').map(s => s.trim()).filter(Boolean),
+    notifyOnNew: p.notifyOnNew.checked,
+    notifyMinScore: +p.notifyMinScore.value,
+    replyTemplate: p.replyTemplate.value
   };
   await chrome.storage.local.set({ prospectSettings });
   await chrome.runtime.sendMessage({ type: 'RESCHEDULE_PROSPECT' });
 }
-[p.enabled, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.keywords].forEach(el => {
+[p.enabled, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate].forEach(el => {
   el.addEventListener('change', saveProspect);
   el.addEventListener('blur', saveProspect);
 });

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   scoreAd, ageDays, buildSearchPayload, buildEntry,
-  sortEntries, runProspectScan,
+  sortEntries, runProspectScan, formatReplyTemplate,
   STRONG_SIGNALS, MODERATE_SIGNALS, NEG_SIGNALS, DEMAND_PREFIX
 } from '../prospect.js';
 import {
@@ -165,4 +165,36 @@ test('regex: DEMAND_PREFIX catches request titles', () => {
     assert.ok(DEMAND_PREFIX.test(t), `should match: ${t}`);
   }
   assert.ok(!DEMAND_PREFIX.test('Mon site est cassé'), 'no false positive');
+});
+
+// ─── formatReplyTemplate ──────────────────────────────────────────────────
+
+test('formatReplyTemplate: substitutes {subject} {keyword} {location} {age_days}', () => {
+  const out = formatReplyTemplate(
+    'Bonjour, {subject} en {location} (il y a {age_days}) — kw={keyword}',
+    { subject: 'Cherche dev PHP', kw_hit: '#php', location: 'Besançon 25000', age_days: 3 }
+  );
+  assert.equal(out, 'Bonjour, Cherche dev PHP en Besançon 25000 (il y a 3j) — kw=php');
+});
+
+test('formatReplyTemplate: strips leading # from keyword', () => {
+  assert.equal(
+    formatReplyTemplate('kw={keyword}', { kw_hit: '#wordpress' }),
+    'kw=wordpress'
+  );
+});
+
+test('formatReplyTemplate: leaves unknown placeholders untouched', () => {
+  const out = formatReplyTemplate('Hello {unknown} {subject}', { subject: 'X' });
+  assert.equal(out, 'Hello {unknown} X');
+});
+
+test('formatReplyTemplate: handles empty/null prospect fields', () => {
+  const out = formatReplyTemplate('{subject}-{location}-{age_days}', {});
+  assert.equal(out, '--');
+});
+
+test('formatReplyTemplate: returns empty string for empty template', () => {
+  assert.equal(formatReplyTemplate('', { subject: 'X' }), '');
+  assert.equal(formatReplyTemplate(null, { subject: 'X' }), '');
 });

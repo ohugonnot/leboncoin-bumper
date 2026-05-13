@@ -14,7 +14,8 @@ chrome.runtime.onInstalled.addListener(async () => {
     await chrome.storage.local.set({
       settings: {
         enabled: false, dryRun: true,
-        dayOfWeek: 1, hour: 9, minute: 0, onlyAdIds: []
+        dayOfWeek: 1, hour: 9, minute: 0, onlyAdIds: [],
+        jitterMinutes: 60
       },
       log: []
     });
@@ -25,7 +26,9 @@ chrome.runtime.onInstalled.addListener(async () => {
         enabled: false,
         dayOfWeek: 1, hour: 10, minute: 0,
         maxAgeDays: 30, minScore: 5,
-        keywords: DEFAULT_KEYWORDS
+        keywords: DEFAULT_KEYWORDS,
+        notifyOnNew: true,
+        notifyMinScore: 7
       },
       prospectSeenIds: [],
       prospectResults: [],
@@ -96,15 +99,58 @@ async function doProspectScan(trigger) {
     prospectResults: out.results,
     prospectLastRun: { ts: new Date().toISOString(), trigger, total: out.total, scanned: out.scannedKeywords }
   });
+  await maybeNotify(out.results, seen, prospectSettings);
   return out;
 }
+
+async function maybeNotify(results, seenBefore, settings) {
+  if (settings?.notifyOnNew === false) return;
+  const minScore = settings?.notifyMinScore ?? 7;
+  const fresh = results.filter(r => !seenBefore.has(r.list_id) && r.score >= minScore);
+  if (!fresh.length) return;
+
+  const top = fresh[0];
+  const others = fresh.length - 1;
+  const title = fresh.length === 1
+    ? `🎯 Nouveau prospect (score ${top.score})`
+    : `🎯 ${fresh.length} nouveaux prospects (top score ${top.score})`;
+  const message = others
+    ? `${top.subject}\n— et ${others} autre${others > 1 ? 's' : ''}.`
+    : `${top.subject}\n📍 ${top.location || ''}`;
+
+  const id = `lbc-prospect-${Date.now()}`;
+  await chrome.notifications.create(id, {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
+    title,
+    message,
+    contextMessage: 'Leboncoin Bumper',
+    priority: 1
+  });
+  pendingNotificationTarget.set(id, fresh.length === 1 ? top.url : null);
+}
+
+const pendingNotificationTarget = new Map();
+
+chrome.notifications.onClicked.addListener(async (id) => {
+  const url = pendingNotificationTarget.get(id);
+  pendingNotificationTarget.delete(id);
+  await chrome.notifications.clear(id);
+  if (url) {
+    chrome.tabs.create({ url });
+  } else {
+    chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html?fullpage=1#prospect') });
+  }
+});
 
 async function rescheduleBump() {
   const { settings } = await chrome.storage.local.get('settings');
   await chrome.alarms.clear(BUMP_ALARM);
   if (!settings?.enabled) return;
+  // Jitter avoids a perfectly regular weekly signature (DataDome heuristic).
+  const jitter = jitterMs(settings.jitterMinutes ?? 60);
   chrome.alarms.create(BUMP_ALARM, {
-    when: nextOccurrence(settings.dayOfWeek, settings.hour, settings.minute),
+    when: nextOccurrence(settings.dayOfWeek, settings.hour, settings.minute) + jitter,
     periodInMinutes: 7 * 24 * 60
   });
 }
@@ -113,10 +159,18 @@ async function rescheduleProspect() {
   const { prospectSettings } = await chrome.storage.local.get('prospectSettings');
   await chrome.alarms.clear(PROSPECT_ALARM);
   if (!prospectSettings?.enabled) return;
+  const jitter = jitterMs(prospectSettings.jitterMinutes ?? 30);
   chrome.alarms.create(PROSPECT_ALARM, {
-    when: nextOccurrence(prospectSettings.dayOfWeek, prospectSettings.hour, prospectSettings.minute),
+    when: nextOccurrence(prospectSettings.dayOfWeek, prospectSettings.hour, prospectSettings.minute) + jitter,
     periodInMinutes: 7 * 24 * 60
   });
+}
+
+function jitterMs(maxMinutes) {
+  if (!maxMinutes || maxMinutes <= 0) return 0;
+  // Symmetric ±N: half before, half after the nominal slot.
+  const span = maxMinutes * 60 * 1000;
+  return Math.floor(Math.random() * span) - Math.floor(span / 2);
 }
 
 function nextOccurrence(dow, hour, minute) {
