@@ -250,6 +250,10 @@ const p = {
   minScore: document.getElementById('p-minScore'),
   maxAgeDays: document.getElementById('p-maxAgeDays'),
   adType: document.getElementById('p-adType'),
+  priceMin: document.getElementById('p-priceMin'),
+  priceMax: document.getElementById('p-priceMax'),
+  departments: document.getElementById('p-departments'),
+  sortBy: document.getElementById('p-sortBy'),
   keywords: document.getElementById('p-keywords'),
   replyTemplate: document.getElementById('p-replyTemplate'),
   // Profile picker
@@ -298,6 +302,10 @@ async function loadProspect() {
   p.minScore.value = profile.minScore ?? 5;
   p.maxAgeDays.value = profile.maxAgeDays ?? 30;
   p.adType.value = profile.adType || 'demand';
+  p.priceMin.value = profile.priceMin ?? '';
+  p.priceMax.value = profile.priceMax ?? '';
+  p.departments.value = (profile.departments || []).join(', ');
+  p.sortBy.value = `${profile.sortBy || 'time'}-${profile.sortOrder || 'desc'}`;
   p.keywords.value = (profile.keywords || []).join('\n');
   p.replyTemplate.value = profile.replyTemplate || DEFAULT_REPLY_TEMPLATE;
 
@@ -448,12 +456,19 @@ function updateFrequencyVisibility() {
 
 async function saveProspect() {
   const { prospectProfiles = [], activeProfileId } = await chrome.storage.local.get(['prospectProfiles', 'activeProfileId']);
+  // Parse "time-desc" → sortBy=time, sortOrder=desc
+  const [sortBy, sortOrder] = (p.sortBy.value || 'time-desc').split('-');
+  const departments = p.departments.value.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+  const priceMin = p.priceMin.value === '' ? null : Math.max(0, +p.priceMin.value);
+  const priceMax = p.priceMax.value === '' ? null : Math.max(0, +p.priceMax.value);
+
   const nextProfiles = prospectProfiles.map(pr => pr.id === activeProfileId ? {
     ...pr,
     keywords: p.keywords.value.split('\n').map(s => s.trim()).filter(Boolean),
     minScore: +p.minScore.value,
     maxAgeDays: +p.maxAgeDays.value,
     adType: p.adType.value,
+    priceMin, priceMax, departments, sortBy, sortOrder,
     replyTemplate: p.replyTemplate.value
   } : pr);
   const prospectGlobalSettings = {
@@ -472,7 +487,7 @@ async function saveProspect() {
   updateFrequencyVisibility();
   await chrome.runtime.sendMessage({ type: 'RESCHEDULE_PROSPECT' });
 }
-[p.enabled, p.frequency, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.adType, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate].forEach(el => {
+[p.enabled, p.frequency, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.adType, p.priceMin, p.priceMax, p.departments, p.sortBy, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate].forEach(el => {
   el.addEventListener('change', saveProspect);
   el.addEventListener('blur', saveProspect);
 });

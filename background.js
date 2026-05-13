@@ -152,8 +152,15 @@ async function doProspectScan(trigger) {
   const maxAgeDays = profile.maxAgeDays || 30;
   const minScore = profile.minScore || 5;
   const adType = profile.adType || 'demand';
+  const apiFilters = {
+    priceMin: profile.priceMin,
+    priceMax: profile.priceMax,
+    departments: profile.departments || [],
+    sortBy: profile.sortBy || 'time',
+    sortOrder: profile.sortOrder || 'desc'
+  };
   // Fetch routed through a leboncoin tab — direct SW fetch is 403'd by DataDome.
-  const { adsByKeyword, contactedAdIds = [] } = await fetchAdsViaTab(keywords, maxAgeDays, adType);
+  const { adsByKeyword, contactedAdIds = [] } = await fetchAdsViaTab(keywords, maxAgeDays, adType, apiFilters);
   // Merge live conversations (API) with the local memory of past contacts
   // (which survives deletion of conversations on leboncoin's side).
   const allContacted = new Set([...contactedAdIds, ...prospectContactedLocal]);
@@ -184,7 +191,12 @@ async function profileCreate(name) {
   const profile = {
     id, name: (name || 'Nouvelle veille').slice(0, 60),
     keywords: [],
-    minScore: 1, maxAgeDays: 30, adType: 'demand', replyTemplate: ''
+    minScore: 1, maxAgeDays: 30, adType: 'demand',
+    priceMin: null, priceMax: null,
+    departments: [],     // array of FR dept codes (strings : "25", "2A", "75")
+    sortBy: 'time',      // 'time' | 'price'
+    sortOrder: 'desc',   // 'asc' | 'desc'
+    replyTemplate: ''
   };
   await chrome.storage.local.set({
     prospectProfiles: [...prospectProfiles, profile],
