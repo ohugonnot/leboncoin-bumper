@@ -29,30 +29,27 @@ body.fullpage {
   margin: 0 auto;
   min-height: 100vh;
 }
-/* Fullpage list heights. The prospect panel is laid out as a flex column so
-   the settings (last child <details>) stay anchored at the bottom — no need
-   to scroll through 1000 results to reach them. The list scrolls internally. */
-body.fullpage .log { height: auto; min-height: 200px; max-height: 60vh; }
-body.fullpage .inbox-list { max-height: 75vh; }
-body.fullpage .listings { max-height: none; }
+/* Fullpage : a single page scrollbar, never scroll-within-scroll. Lists grow
+   naturally, the page scrolls. Footer elements (settings, planner) sticky
+   at the bottom so they stay reachable without scrolling through 1000 items. */
+body.fullpage .log { height: auto; min-height: 180px; max-height: none; }
+body.fullpage .inbox-list,
+body.fullpage .prospect-list,
+body.fullpage .listings { max-height: none; overflow: visible; }
 
-body.fullpage .panel[data-panel="prospect"].active {
-  display: flex;
-  flex-direction: column;
-  height: calc(100vh - 56px);  /* tabs + small breathing room */
-}
-body.fullpage .panel[data-panel="prospect"].active .prospect-list {
-  flex: 1 1 auto;
-  min-height: 180px;
-  max-height: none;
+body.fullpage .panel.active > details.section {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-soft);
+  margin: 0 -14px -16px;
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--border);
+  max-height: 70vh;
   overflow-y: auto;
+  z-index: 5;
+  box-shadow: 0 -4px 12px rgba(20,30,50,0.05);
 }
-body.fullpage .panel[data-panel="prospect"].active > details.section {
-  flex: 0 0 auto;
-  max-height: 55vh;
-  overflow-y: auto;
-}
-body.fullpage .panel[data-panel="prospect"].active > hr { flex: 0 0 auto; }
+body.fullpage .panel.active > hr { display: none; }
 
 .inbox-search {
   margin-bottom: 10px;
