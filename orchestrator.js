@@ -164,14 +164,15 @@ export async function checkLoginStatus() {
  *
  * @returns {Promise<{adsByKeyword: Object, contactedAdIds: string[]}>}
  */
-export async function fetchAdsViaTab(keywords, maxAgeDays = 30) {
+export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand') {
   const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
   try {
     await waitForTabLoad(tab.id);
+    const adTypes = adType === 'both' ? ['demand', 'offer'] : [adType];
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      args: [keywords, maxAgeDays],
-      func: async (kws, maxAge) => {
+      args: [keywords, maxAgeDays, adTypes],
+      func: async (kws, maxAge, adTypesEnum) => {
         const API_URL = 'https://api.leboncoin.fr/finder/search';
         const API_KEY = 'ba0c2dad52b3ec';
         const ageDays = (iso) => {
@@ -217,7 +218,7 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30) {
                 credentials: 'include',
                 body: JSON.stringify({
                   sort_by: 'time', sort_order: 'desc', limit: 100, offset,
-                  filters: { enums: { ad_type: ['demand'] }, keywords: { text: kw } }
+                  filters: { enums: { ad_type: adTypesEnum }, keywords: { text: kw } }
                 })
               });
               if (!res.ok) break;

@@ -249,6 +249,7 @@ const p = {
   // Per-profile settings
   minScore: document.getElementById('p-minScore'),
   maxAgeDays: document.getElementById('p-maxAgeDays'),
+  adType: document.getElementById('p-adType'),
   keywords: document.getElementById('p-keywords'),
   replyTemplate: document.getElementById('p-replyTemplate'),
   // Profile picker
@@ -296,6 +297,7 @@ async function loadProspect() {
   // Per-profile settings
   p.minScore.value = profile.minScore ?? 5;
   p.maxAgeDays.value = profile.maxAgeDays ?? 30;
+  p.adType.value = profile.adType || 'demand';
   p.keywords.value = (profile.keywords || []).join('\n');
   p.replyTemplate.value = profile.replyTemplate || DEFAULT_REPLY_TEMPLATE;
 
@@ -450,6 +452,7 @@ async function saveProspect() {
     keywords: p.keywords.value.split('\n').map(s => s.trim()).filter(Boolean),
     minScore: +p.minScore.value,
     maxAgeDays: +p.maxAgeDays.value,
+    adType: p.adType.value,
     replyTemplate: p.replyTemplate.value
   } : pr);
   const prospectGlobalSettings = {
@@ -468,7 +471,7 @@ async function saveProspect() {
   updateFrequencyVisibility();
   await chrome.runtime.sendMessage({ type: 'RESCHEDULE_PROSPECT' });
 }
-[p.enabled, p.frequency, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate].forEach(el => {
+[p.enabled, p.frequency, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.adType, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate].forEach(el => {
   el.addEventListener('change', saveProspect);
   el.addEventListener('blur', saveProspect);
 });

@@ -127,7 +127,12 @@
     <details class="section">
       <summary><h2 class="section-title">⚙️ Réglages de cette veille</h2></summary>
 
-      <p class="section-hint">Les keywords / template sont propres à la veille active. Le planning et les notifications sont globaux.</p>
+      <div class="score-help">
+        <strong>Comment marche le score ?</strong>
+        Chaque annonce reçoit un score <strong>★</strong> = nombre de tes mots-clés trouvés dans l'annonce (titre + description), +1 si elle commence par <em>Cherche / Recherche / Besoin</em>.<br>
+        Exemple avec keywords <code>wordpress, php, prestashop</code> : "Cherche dev WordPress + PHP" → ★ 3 (2 keywords + bonus).<br>
+        <strong>Score min</strong> = filtre d'affichage. <strong>Notif si score ≥</strong> = seuil pour t'alerter par notif.
+      </div>
 
       <label class="toggle">
         <input type="checkbox" id="p-enabled">
@@ -160,6 +165,14 @@
       <div class="row" style="margin-top: 6px;">
         <div class="field" title="Score = nombre de tes keywords matés dans l'annonce, +1 si commence par Cherche/Recherche."><label>Score min</label><input type="number" id="p-minScore" min="0" max="20"></div>
         <div class="field"><label>Âge max (j)</label><input type="number" id="p-maxAgeDays" min="1" max="90"></div>
+        <div class="field" title="Demande = quelqu'un cherche un service. Offre = quelqu'un propose / vend. Les deux = scan dans les deux types (2× plus de requêtes).">
+          <label>Type</label>
+          <select id="p-adType">
+            <option value="demand">Demandes</option>
+            <option value="offer">Offres</option>
+            <option value="both">Les deux</option>
+          </select>
+        </div>
       </div>
 
       <label class="toggle" style="margin-top: 10px;">
@@ -172,9 +185,8 @@
       </div>
 
       <div class="field" style="margin-top: 10px;">
-        <label>Mots-clés <span class="muted">(un par ligne, propre à cette veille)</span></label>
+        <label>Mots-clés <span class="muted">(un par ligne)</span></label>
         <textarea id="p-keywords" rows="6" style="resize: vertical; min-height: 90px;" placeholder="wordpress&#10;prestashop&#10;…"></textarea>
-        <p class="section-hint">Le scan interroge l'API leboncoin pour chaque mot-clé (recherche "demande" uniquement).</p>
       </div>
 
       <div class="field" style="margin-top: 10px;">
