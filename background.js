@@ -6,20 +6,13 @@
 // `true` (async response promised) and the popup leaves before sendResponse
 // fires, Chrome rejects the channel promise with "message channel closed".
 // The work itself succeeded (written to storage). Mute only this rejection.
+// All of these mean "the peer (popup or tab) vanished mid-operation". Work
+// has already been persisted to chrome.storage in the surviving handlers —
+// silencing only suppresses console noise.
+const POPUP_GONE_RE = /message channel closed|Frame with ID|back\/forward cache|No tab with id|tab was closed|Extension context invalidated|Receiving end does not exist/i;
 self.addEventListener('unhandledrejection', (e) => {
-  const msg = e.reason?.message || '';
-  // All of these mean "popup vanished mid-operation". Work has already been
-  // persisted to chrome.storage in the surviving handlers — silencing here
-  // only suppresses noisy console output, no behavior is lost.
-  if (
-    msg.includes('message channel closed') ||
-    msg.includes('back/forward cache') ||
-    msg.includes('Frame with ID') ||
-    msg.includes('No tab with id') ||
-    msg.includes('The tab was closed')
-  ) {
-    e.preventDefault();
-  }
+  const text = String(e.reason?.message ?? e.reason ?? '');
+  if (POPUP_GONE_RE.test(text)) e.preventDefault();
 });
 
 import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm, fetchInboxViaTab } from './orchestrator.js';
