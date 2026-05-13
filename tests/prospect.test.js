@@ -101,6 +101,32 @@ test('sortEntries: new before seen, then by score', () => {
   assert.deepEqual(sorted.map(e => e.list_id), ['c', 'b', 'a']);
 });
 
+test('sortEntries: price-asc puts cheapest first, null prices last', () => {
+  const sorted = sortEntries([
+    { list_id: 'a', score: 5, age_days: 1, is_new: true, price: 30 },
+    { list_id: 'b', score: 5, age_days: 1, is_new: true, price: null },
+    { list_id: 'c', score: 5, age_days: 1, is_new: true, price: 10 }
+  ], 'price-asc');
+  assert.deepEqual(sorted.map(e => e.list_id), ['c', 'a', 'b']);
+});
+
+test('sortEntries: price-desc puts most expensive first, null prices last', () => {
+  const sorted = sortEntries([
+    { list_id: 'a', score: 5, age_days: 1, is_new: true, price: 30 },
+    { list_id: 'b', score: 5, age_days: 1, is_new: true, price: null },
+    { list_id: 'c', score: 5, age_days: 1, is_new: true, price: 100 }
+  ], 'price-desc');
+  assert.deepEqual(sorted.map(e => e.list_id), ['c', 'a', 'b']);
+});
+
+test('sortEntries: NEW always wins over seen, even with sort=price', () => {
+  const sorted = sortEntries([
+    { list_id: 'a', is_new: false, price: 5, score: 5, age_days: 1 },
+    { list_id: 'b', is_new: true, price: 999, score: 5, age_days: 1 }
+  ], 'price-asc');
+  assert.deepEqual(sorted.map(e => e.list_id), ['b', 'a']);  // new wins
+});
+
 // ─── runProspectScan (integration with mock fetch) ────────────────────────
 
 test('runProspectScan: filters by minScore, drops too-old, dedup by id', async () => {

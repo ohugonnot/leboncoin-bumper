@@ -311,7 +311,10 @@ async function loadProspect() {
   p.priceMin.value = profile.priceMin ?? '';
   p.priceMax.value = profile.priceMax ?? '';
   p.departments.value = (profile.departments || []).join(', ');
-  p.sortBy.value = `${profile.sortBy || 'time'}-${profile.sortOrder || 'desc'}`;
+  // Whitelist : legacy values like 'desc' / 'asc' don't exist in the new
+  // dropdown, so we fall back to the default.
+  const validSorts = ['score', 'time', 'price-asc', 'price-desc'];
+  p.sortBy.value = validSorts.includes(profile.sortOrder) ? profile.sortOrder : 'score';
   p.ownerType.value = profile.ownerType || 'all';
   p.shippableOnly.checked = !!profile.shippableOnly;
   p.keywords.value = (profile.keywords || []).join('\n');
@@ -468,8 +471,6 @@ function updateFrequencyVisibility() {
 
 async function saveProspect() {
   const { prospectProfiles = [], activeProfileId } = await chrome.storage.local.get(['prospectProfiles', 'activeProfileId']);
-  // Parse "time-desc" → sortBy=time, sortOrder=desc
-  const [sortBy, sortOrder] = (p.sortBy.value || 'time-desc').split('-');
   const departments = p.departments.value.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
   const priceMin = p.priceMin.value === '' ? null : Math.max(0, +p.priceMin.value);
   const priceMax = p.priceMax.value === '' ? null : Math.max(0, +p.priceMax.value);
@@ -480,7 +481,8 @@ async function saveProspect() {
     minScore: +p.minScore.value,
     maxAgeDays: +p.maxAgeDays.value,
     adType: p.adType.value,
-    priceMin, priceMax, departments, sortBy, sortOrder,
+    priceMin, priceMax, departments,
+    sortOrder: p.sortBy.value,
     ownerType: p.ownerType.value,
     shippableOnly: p.shippableOnly.checked,
     replyTemplate: p.replyTemplate.value
