@@ -1,3 +1,18 @@
+// MV3 popup auto-closes on blur. Any sendMessage in flight at that moment
+// rejects with "message channel closed" / "Frame with ID … was removed".
+// The SW handler has already persisted its result to chrome.storage by then,
+// so the popup didn't actually need the response. Silence only these patterns.
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = e.reason?.message || '';
+  if (
+    msg.includes('message channel closed') ||
+    msg.includes('Frame with ID') ||
+    msg.includes('Extension context invalidated')
+  ) {
+    e.preventDefault();
+  }
+});
+
 // ─── Fullpage mode (when opened in a regular tab) ──────────────────────────
 const fullpage = new URLSearchParams(location.search).get('fullpage') === '1';
 if (fullpage) document.body.classList.add('fullpage');

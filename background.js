@@ -8,7 +8,16 @@
 // The work itself succeeded (written to storage). Mute only this rejection.
 self.addEventListener('unhandledrejection', (e) => {
   const msg = e.reason?.message || '';
-  if (msg.includes('message channel closed') || msg.includes('back/forward cache')) {
+  // All of these mean "popup vanished mid-operation". Work has already been
+  // persisted to chrome.storage in the surviving handlers — silencing here
+  // only suppresses noisy console output, no behavior is lost.
+  if (
+    msg.includes('message channel closed') ||
+    msg.includes('back/forward cache') ||
+    msg.includes('Frame with ID') ||
+    msg.includes('No tab with id') ||
+    msg.includes('The tab was closed')
+  ) {
     e.preventDefault();
   }
 });
