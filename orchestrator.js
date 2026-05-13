@@ -522,111 +522,419 @@ async function deleteListing(tabId, adId) {
   await waitForText(tabId, 'a bien été prise en compte', 10000);
 }
 
+// ── Wizard 2026 helpers ──────────────────────────────────────────────────────
+
+// catSlug → label humain affiché par LBC dans ses sous-catégories
+function slugToHuman(slug) {
+  return (slug || '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+  // 'accessoires_informatique' → 'Accessoires informatique'
+}
+
+// catSlug → famille parente cliquable dans le sélecteur de catégories
+function categoryParentFamily(slug) {
+  const map = {
+    accessoires_informatique: 'Électronique', ordinateurs: 'Électronique',
+    consoles: 'Électronique', jeux_video: 'Électronique',
+    telephones_objets_connectes: 'Électronique', accessoires_telephone: 'Électronique',
+    image_son: 'Électronique', tablettes: 'Électronique',
+    photo_audio_video: 'Électronique', hifi_son: 'Électronique',
+    immobilier_neuf: 'Immobilier', ventes_immobilieres: 'Immobilier',
+    locations: 'Immobilier', colocations: 'Immobilier',
+    voitures: 'Véhicules', motos: 'Véhicules', caravaning: 'Véhicules',
+    utilitaires: 'Véhicules', equipement_auto: 'Véhicules',
+    equipement_moto: 'Véhicules', bateaux: 'Véhicules',
+    emploi: 'Emploi', offres_emploi: 'Emploi',
+    prestations: 'Services', autres_services: 'Services', services: 'Services',
+    cours_particuliers: 'Services', evenements: 'Services',
+    vetements: 'Mode', chaussures: 'Mode', accessoires_bagagerie: 'Mode',
+    montres_bijoux: 'Mode',
+    jeux_jouets: 'Loisirs', bd_revues: 'Loisirs', sport_plein_air: 'Loisirs',
+    instruments_de_musique: 'Loisirs', art_artisanat: 'Loisirs',
+    livres: 'Loisirs', dvd_films: 'Loisirs', vins_gastronomie: 'Loisirs',
+    vide_grenier: 'Loisirs', collection: 'Loisirs',
+    ameublement: 'Maison & Jardin', electromenager: 'Maison & Jardin',
+    decoration: 'Maison & Jardin', bricolage: 'Maison & Jardin',
+    jardinage: 'Maison & Jardin',
+    equipement_bebe: 'Famille', vetements_bebe: 'Famille', mobilier_enfant: 'Famille',
+    animaux: 'Animaux', accessoires_animaux: 'Animaux',
+  };
+  return map[slug] || null;
+}
+
+// Cliquer un bouton via predicate (closure), 3 tentatives avec backoff exponentiel
+async function clickWithRetry(tabId, predicate, { label = 'button' } = {}) {
+  const delays = [0, 500, 1000, 2000];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (delays[attempt]) await sleep(delays[attempt]);
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId }, func: predicate
+    });
+    if (result) return;
+  }
+  throw new Error(`clickWithRetry: "${label}" introuvable après 3 tentatives`);
+}
+
 async function repostListing(tabId, data) {
+  // ── Étape 0 : Reset — LBC garde l'état du wizard entre sessions ──────────
   await navigate(tabId, DEPOSIT_URL);
-  await waitForSelector(tabId, 'input[name="subject"]');
+  await log('    [wizard] step 0: reset wizard state');
+
+  // Retourner au step 1 si on atterrit en plein milieu d'un draft persistant
+  let onStep1 = false;
+  for (let back = 0; back < 8; back++) {
+    const [{ result: heading }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const h2 = document.querySelector('h2');
+        return h2?.textContent?.trim() || null;
+      }
+    });
+    if (heading && heading.match(/Commen[çc]ons par l['’]essentiel/i)) {
+      onStep1 = true;
+      break;
+    }
+    // Essayer "Retour" en priorité, puis "Quitter"
+    const [{ result: clicked }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const btn = [...document.querySelectorAll('button')]
+          .find(b => /^retour$/i.test((b.textContent || '').trim()));
+        if (btn) { btn.click(); return 'retour'; }
+        const quit = [...document.querySelectorAll('button')]
+          .find(b => /^quitter$/i.test((b.textContent || '').trim()));
+        if (quit) { quit.click(); return 'quitter'; }
+        return null;
+      }
+    });
+    if (!clicked) break;
+    // Accepter un éventuel dialog de confirmation quand on clique "Quitter"
+    if (clicked === 'quitter') {
+      await sleep(600);
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const confirmBtn = [...document.querySelectorAll('button')]
+            .find(b => /confirmer|quitter|oui/i.test((b.textContent || '').trim()));
+          if (confirmBtn) confirmBtn.click();
+        }
+      });
+      await navigate(tabId, DEPOSIT_URL);
+    }
+    await sleep(600);
+  }
+
+  if (!onStep1) {
+    // Vérification finale — si toujours pas step 1 après les tentatives de retour
+    const [{ result: h2Final }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => document.querySelector('h2')?.textContent?.trim() || null
+    });
+    if (!h2Final || !h2Final.match(/Commen[çc]ons par l['’]essentiel/i)) {
+      throw new Error(`[wizard] step 0: impossible de revenir au step 1. Heading actuel: "${h2Final}"`);
+    }
+  }
+  await log('    [wizard] step 0: on step 1 OK');
+
+  // ── Étape 1 : Titre + catégorie ──────────────────────────────────────────
+  await waitForSelector(tabId, 'input[name="subject"]', 15000);
   await log('    [wizard] step 1: subject + category');
 
   await fillField(tabId, 'input[name="subject"]', data.subject);
-  await waitForSelector(tabId, 'input[type="radio"]', 8000).catch(() => {});
-  await sleep(1200);
+  await sleep(1500); // LBC re-render lent après le fill
 
+  // Tenter les radios de catégories suggérées
+  await waitForSelector(tabId, 'input[type="radio"]', 8000).catch(() => {});
   const [{ result: radioPick }] = await chrome.scripting.executeScript({
     target: { tabId },
     args: [data.catSlug],
     func: (slug) => {
-      const wanted = (slug || '').replace(/_/g, ' ').toLowerCase();
+      const catSlug = (slug || '').replace(/_/g, ' ').toLowerCase();
       const radios = [...document.querySelectorAll('input[type="radio"]')];
       const labels = radios.map(r => (r.closest('label') || r.parentElement)?.textContent?.trim().toLowerCase() || '');
-      const matchIdx = labels.findIndex(l => l.endsWith(wanted));
-      if (matchIdx >= 0) { radios[matchIdx].click(); return { matched: true, label: labels[matchIdx], suggestions: labels }; }
-      return { matched: false, suggestions: labels };
+      const matchIdx = labels.findIndex(l => l.endsWith(catSlug));
+      if (matchIdx >= 0) { radios[matchIdx].click(); return { matched: true, label: labels[matchIdx] }; }
+      return { matched: false };
     }
   });
-  if (!radioPick.matched) {
-    throw new Error(`Catégorie "${data.catSlug}" non suggérée par LBC. Suggestions : ${radioPick.suggestions.join(' | ')}. Renomme l'annonce pour matcher.`);
+
+  if (radioPick.matched) {
+    await log(`    [wizard] step 1: category matched via radio "${radioPick.label}"`);
+  } else {
+    // Fallback manuel : sélecteur de famille → sous-catégorie
+    await log(`    [wizard] step 1: no radio match for "${data.catSlug}", fallback manual`);
+    const family = categoryParentFamily(data.catSlug);
+    if (!family) throw new Error(`[wizard] step 1: famille parente inconnue pour catSlug="${data.catSlug}"`);
+
+    // Cliquer "Choisissez"
+    await clickWithRetry(tabId, () => {
+      const btn = [...document.querySelectorAll('button')]
+        .find(b => (b.textContent || '').trim() === 'Choisissez');
+      if (btn) { btn.click(); return true; }
+      return false;
+    }, { label: 'Choisissez' });
+    await sleep(1000);
+
+    // Cliquer la famille parente (avec args, incompatible avec clickWithRetry — retry manuel)
+    let familyClicked = false;
+    for (let attempt = 0; attempt < 3 && !familyClicked; attempt++) {
+      if (attempt > 0) await sleep(attempt * 500);
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId }, args: [family],
+        func: (fam) => {
+          const btn = [...document.querySelectorAll('button')]
+            .find(b => (b.textContent || '').trim() === fam);
+          if (btn) { btn.click(); return true; }
+          return false;
+        }
+      });
+      familyClicked = result;
+    }
+    if (!familyClicked) throw new Error(`[wizard] step 1: famille "${family}" introuvable dans la liste`);
+    await sleep(1000);
+
+    // Cliquer la sous-catégorie
+    const humanName = slugToHuman(data.catSlug);
+    const [{ result: subCatResult }] = await chrome.scripting.executeScript({
+      target: { tabId }, args: [humanName],
+      func: (name) => {
+        const btn = [...document.querySelectorAll('button')]
+          .find(b => (b.textContent || '').trim() === name);
+        if (btn) { btn.click(); return { ok: true }; }
+        const available = [...document.querySelectorAll('button')]
+          .map(b => b.textContent?.trim()).filter(Boolean);
+        return { ok: false, available };
+      }
+    });
+    if (!subCatResult.ok) {
+      throw new Error(`[wizard] step 1: sous-catégorie "${humanName}" introuvable. Disponibles: ${subCatResult.available?.join(' | ')}`);
+    }
+    await log(`    [wizard] step 1: category selected via fallback family="${family}" sub="${humanName}"`);
   }
-  await log(`    [wizard] step 1: category matched "${radioPick.label}"`);
   await sleep(800);
 
-  // Step 2: photos. Some categories now show the photo step inline after radio
-  // click (no "Continuer" needed). The single `input[type="file"]` with
-  // multiple=true accepts all photos at once; LBC orders them as cover, side
-  // views, etc. Defensive: also handle multi-input designs (1 input per slot).
+  // ── Étape 2 : Photos (pas de Continuer entre catégorie et photos) ─────────
+  // Le step photos s'affiche directement après le clic catégorie, sans Continuer intermédiaire.
   await waitForSelector(tabId, 'input[type="file"]', 15000);
   await log(`    [wizard] step 2: file input found, uploading ${data.photos.length} photo(s)`);
   await uploadPhotos(tabId, data.photos);
-  await sleep(1500);
+  await sleep(2000); // preview rendering
   await clickContinue(tabId);
   await log('    [wizard] step 2: photos uploaded, continued');
 
-  await waitForSelector(tabId, 'textarea[name="body"]');
+  // ── Étape 3 : "Dites-nous en plus" (attributs catégorie, optionnel) ───────
+  // Après Continuer photos, on atterrit soit sur le step description, soit sur un
+  // step d'attributs spécifiques à la catégorie. On détecte en attendant l'un ou l'autre.
+  let onAttributes = false;
+  const t3 = Date.now();
+  while (Date.now() - t3 < 10000) {
+    const [{ result: step3State }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const body = document.querySelector('textarea[name="body"]');
+        const h2 = document.querySelector('h2');
+        const heading = h2?.textContent?.trim() || '';
+        return {
+          hasBody: !!body,
+          headingIncludesDites: heading.toLowerCase().includes('dites-nous en plus'),
+        };
+      }
+    });
+    if (step3State.hasBody) break; // Pas d'étape attributs, aller directement à description
+    if (step3State.headingIncludesDites) { onAttributes = true; break; }
+    await sleep(400);
+  }
+
+  if (onAttributes) {
+    await log('    [wizard] step 3: attributs requis détectés');
+    // Traiter tous les dropdowns visibles. Ceux obligatoires (label avec *) reçoivent
+    // un défaut safe : "État" → "Bon état", "Produit" → "Autre". Les optionnels sont skippés.
+    const [{ result: dropdowns }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const btns = [...document.querySelectorAll('button[aria-label="Ouvrir la liste"]')];
+        return btns.map(btn => {
+          const container = btn.closest('div, fieldset, section') || btn.parentElement;
+          const labelEl = container?.querySelector('label') || container?.previousElementSibling;
+          const labelText = labelEl?.textContent?.trim() || '';
+          const required = labelText.includes('*');
+          return { required, labelText };
+        });
+      }
+    });
+
+    const openButtons = dropdowns;
+    for (let i = 0; i < openButtons.length; i++) {
+      const { required, labelText } = openButtons[i];
+      if (!required) continue; // skip optionnel
+
+      let defaultOption = null;
+      if (/[ée]tat/i.test(labelText)) defaultOption = 'Bon état';
+      else if (/produit/i.test(labelText)) defaultOption = 'Autre';
+      else throw new Error(`[wizard] step 3: attribut obligatoire sans défaut applicable: "${labelText}"`);
+
+      // Ouvrir le i-ème dropdown
+      await chrome.scripting.executeScript({
+        target: { tabId }, args: [i],
+        func: (idx) => {
+          const btns = [...document.querySelectorAll('button[aria-label="Ouvrir la liste"]')];
+          if (btns[idx]) btns[idx].click();
+        }
+      });
+      await sleep(700);
+
+      const [{ result: optionClicked }] = await chrome.scripting.executeScript({
+        target: { tabId }, args: [defaultOption],
+        func: (opt) => {
+          const option = [...document.querySelectorAll('[role="option"], li button')]
+            .find(el => (el.textContent || '').trim() === opt);
+          if (option) { option.click(); return true; }
+          return false;
+        }
+      });
+      if (!optionClicked) throw new Error(`[wizard] step 3: option "${defaultOption}" introuvable pour "${labelText}"`);
+      await sleep(500);
+      await log(`    [wizard] step 3: "${labelText}" → "${defaultOption}"`);
+    }
+
+    await clickContinue(tabId);
+    await log('    [wizard] step 3: attributs remplis, continued');
+    await waitForSelector(tabId, 'textarea[name="body"]', 10000);
+  }
+
+  // ── Étape 4 : Description ─────────────────────────────────────────────────
+  await waitForSelector(tabId, 'textarea[name="body"]', 10000);
+  await log('    [wizard] step 4: description');
   await fillField(tabId, 'textarea[name="body"]', data.body);
-  await sleep(300);
+  await sleep(500);
   await clickContinue(tabId);
-  await log('    [wizard] step 3: description filled');
+  await log('    [wizard] step 4: description filled, continued');
 
-  await waitForSelector(tabId, 'input[name="price"]');
-  await fillField(tabId, 'input[name="price"]', data.price || '0');
-  await sleep(300);
+  // ── Étape 5 : Prix ────────────────────────────────────────────────────────
+  // Le champ est renommé price_cents (valeur en centimes). Les annonces gratuites
+  // utilisent la checkbox donation car LBC refuse 0 dans price_cents.
+  await waitForSelector(tabId, 'input[name="price_cents"], input[name="donation"]', 10000);
+  await log('    [wizard] step 5: prix');
+  const price = data.price;
+  if (price === 0 || price === '0' || !price) {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const cb = document.querySelector('input[name="donation"]');
+        if (cb && !cb.checked) cb.click();
+      }
+    });
+  } else {
+    await fillField(tabId, 'input[name="price_cents"]', String(parseInt(price) * 100));
+  }
+  await sleep(500);
   await clickContinue(tabId);
-  await log('    [wizard] step 4: price filled');
+  await log('    [wizard] step 5: prix filled, continued');
 
-  await waitForSelector(tabId, 'input[name="location"]');
-  await fillField(tabId, 'input[name="location"]', data.location);
-  await sleep(1500);
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    args: [data.location],
+  // ── Étape 6 : Location ────────────────────────────────────────────────────
+  // LBC bloque silencieusement si on ne clique pas une suggestion de l'autocomplete.
+  // scrapeEditPage renvoie "Lyon (69002)" (format affiché par LBC) mais l'autocomplete
+  // matche mieux "Lyon 69002" (sans parenthèses) — on normalise avant de taper.
+  await waitForSelector(tabId, 'input[name="location"]', 10000);
+  const normalizedLocation = (data.location || '').replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+  await log(`    [wizard] step 6: location "${data.location}" → "${normalizedLocation}"`);
+  await fillField(tabId, 'input[name="location"]', normalizedLocation);
+  await sleep(2500); // suggestions apparaissent (LBC re-render lent)
+  const [{ result: locClicked }] = await chrome.scripting.executeScript({
+    target: { tabId }, args: [data.location],
     func: (loc) => {
-      const want = (loc || '').trim().toLowerCase();
-      const items = [...document.querySelectorAll('li, button, [role="option"]')]
+      // Matcher une entrée de format "Lyon (69002)" depuis la saisie "Lyon 69002"
+      const normalized = (loc || '').trim().replace(/\s+/g, ' ').toLowerCase();
+      const zipMatch = normalized.match(/(\d{5})/);
+      const items = [...document.querySelectorAll('[role="option"], li button')]
         .filter(el => el.offsetParent !== null);
-      const exact = items.find(el => (el.textContent || '').trim().toLowerCase() === want);
-      const target = exact || items.find(el => (el.textContent || '').toLowerCase().includes(want));
-      if (!target) throw new Error('location suggestion not found for: ' + loc);
+      // Préférer un match zipcode exact (plus fiable que le nom de ville)
+      const byZip = zipMatch ? items.find(el => (el.textContent || '').includes(zipMatch[1])) : null;
+      const byText = items.find(el => (el.textContent || '').toLowerCase().includes(normalized));
+      const target = byZip || byText;
+      if (!target) return false;
       target.click();
+      return true;
     }
   });
-  await sleep(300);
-  await clickContinue(tabId);
-  await log('    [wizard] step 5: location filled');
-
-  await waitForSelector(tabId, 'input[name="phone_hidden"]');
-  await chrome.scripting.executeScript({
+  if (!locClicked) throw new Error(`[wizard] step 6: suggestion de location introuvable pour "${data.location}"`);
+  await sleep(1500);
+  // Vérif que le clic suggestion a bien validé la location (le champ doit avoir
+  // un format "<Ville> (<zipcode>)" auto-rempli par LBC après le clic).
+  const [{ result: locFinal }] = await chrome.scripting.executeScript({
     target: { tabId },
-    args: [data.phoneHidden],
-    func: (hidden) => {
-      const cb = document.querySelector('input[name="phone_hidden"]');
-      if (!cb) return;
-      if (cb.checked !== hidden) cb.click();
-    }
+    func: () => document.querySelector('input[name="location"]')?.value || ''
   });
-  await sleep(200);
+  await log(`    [wizard] step 6: location after click = "${locFinal}"`);
   await clickContinue(tabId);
-  await log('    [wizard] step 6: contact prefs set');
+  await log('    [wizard] step 6: location filled, continued');
 
-  await waitForUrl(tabId, /\/options/);
+  // ── Étape intermédiaire : steps optionnels (Coordonnées, Livraison, …) ───
+  // LBC insère parfois 1-2 étapes intermédiaires entre location et /options
+  // (préférences de contact, mode de livraison) avec champs déjà préremplis.
+  // On clique "Continuer" jusqu'à atteindre /options, max 5 tentatives.
+  for (let extra = 0; extra < 5; extra++) {
+    const t = await chrome.tabs.get(tabId);
+    if (/\/options/.test(t.url || '')) break;
+    await sleep(1500);
+    const [{ result: state }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const allHeadings = [...document.querySelectorAll('h1,h2,h3,h4')].map(h => h.textContent?.trim().slice(0, 60));
+        const err = document.querySelector('[role="alert"]')?.textContent?.trim().slice(0, 120) || null;
+        // Find all form sections with their titles + the labels of required fields
+        const requiredLabels = [...document.querySelectorAll('label')]
+          .filter(l => /\*/.test(l.textContent || ''))
+          .map(l => l.textContent?.trim().slice(0, 80));
+        // Find radios (sometimes "mode remise" uses radios)
+        const radioGroups = {};
+        document.querySelectorAll('input[type="radio"]').forEach(r => {
+          const name = r.name || '?';
+          radioGroups[name] = radioGroups[name] || { count: 0, checked: false };
+          radioGroups[name].count++;
+          if (r.checked) radioGroups[name].checked = true;
+        });
+        // List unchecked required radios as suspect
+        const visibleNames = Object.entries(radioGroups).map(([n, info]) => `${n}(${info.count}${info.checked ? ' ✓' : ''})`);
+        const btn = [...document.querySelectorAll('button')]
+          .find(b => /^continuer$/i.test((b.textContent || '').trim()) && !b.disabled);
+        if (btn) { btn.click(); return { clicked: true, headings: allHeadings, err, requiredLabels, radios: visibleNames }; }
+        return { clicked: false, headings: allHeadings, err, requiredLabels, radios: visibleNames };
+      }
+    });
+    await log(`    [wizard] step 6.${extra + 1}: headings=${JSON.stringify(state.headings)} err="${state.err || ''}" required=${JSON.stringify(state.requiredLabels)} radios=${JSON.stringify(state.radios)} clicked=${state.clicked}`);
+    if (!state.clicked) break;
+  }
+
+  // ── Étape 7 : Options (boost) → Confirmation ─────────────────────────────
+  await waitForUrl(tabId, /\/options/, 20000);
   await sleep(800);
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => {
-      const btn = [...document.querySelectorAll('button, a')]
-        .find(b => /sans booster|gratuitement|d[ée]poser sans/i.test(b.textContent || ''));
-      if (!btn) throw new Error('"Déposer sans booster" button not found');
-      btn.click();
-    }
-  });
+  // LBC affiche "Déposer sans booster" en création, "Corriger sans booster" après
+  // une modification d'annonce refusée. On matche les deux.
+  await clickWithRetry(tabId, () => {
+    const btn = [...document.querySelectorAll('button')]
+      .find(b => /(d[ée]poser|corriger)\s+sans\s+booster/i.test(b.textContent || ''));
+    if (btn) { btn.click(); return true; }
+    return false;
+  }, { label: 'Sans booster' });
 
-  await waitForUrl(tabId, /\/confirmation/);
-  await waitForText(tabId, 'bien reçu votre annonce', 15000);
+  await waitForUrl(tabId, /\/confirmation/, 20000);
+  // LBC redirige parfois directement sans afficher le texte de confirmation standard
+  await waitForText(tabId, 'bien reçu votre annonce', 15000).catch(() => {
+    return waitForText(tabId, 'Déposer une annonce', 5000).catch(() => {});
+  });
+  await log('    [wizard] step 7: confirmation OK');
 }
 
 async function uploadPhotos(tabId, photoUrls) {
   if (!photoUrls?.length) return;
   const payload = [];
   for (const url of photoUrls) {
-    const resp = await fetch(url);
+    let resp;
+    try {
+      resp = await fetch(url);
+    } catch (e) {
+      throw new Error(`photo fetch threw (network/CORS/CSP): ${e.message} — url=${url}`);
+    }
     if (!resp.ok) throw new Error(`photo fetch failed (${resp.status}): ${url}`);
     const buf = new Uint8Array(await resp.arrayBuffer());
     let bin = '';
@@ -745,9 +1053,11 @@ async function fillField(tabId, selector, value) {
     func: (sel, val) => {
       const el = document.querySelector(sel);
       if (!el) throw new Error('field not found: ' + sel);
-      // Use the native setter so React state updates correctly.
       const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+      // Vider d'abord : LBC concatène la valeur existante avec le nouveau fill si on ne remet pas à '' avant
+      setter.call(el, '');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
       setter.call(el, val);
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
