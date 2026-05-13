@@ -747,6 +747,7 @@ p.markSeen.addEventListener('click', async () => {
 // ─── Messages / Inbox panel ────────────────────────────────────────────────
 
 let activeInboxFilter = 'all';
+let inboxSearchQuery = '';
 
 // Returns counts of visible (non-archived) conversations per category, plus archived total.
 function computeVisibleCounts(all, dismissedSet) {
@@ -879,16 +880,25 @@ function renderInbox(cache, dismissed) {
   hint.hidden = true;
 
   const isArchived = activeInboxFilter === 'archived';
+  const q = inboxSearchQuery.trim().toLowerCase();
   const visible = all.filter(c => {
     const archived = dismissed.has(c.conversationId);
-    if (isArchived) return archived;
-    if (archived) return false;
-    return activeInboxFilter === 'all' || c._classification?.category === activeInboxFilter;
+    if (isArchived) {
+      if (!archived) return false;
+    } else {
+      if (archived) return false;
+      if (activeInboxFilter !== 'all' && c._classification?.category !== activeInboxFilter) return false;
+    }
+    if (!q) return true;
+    const hay = `${c.partnerName || ''} ${c.subject || ''} ${c.lastMessagePreview || ''}`.toLowerCase();
+    return hay.includes(q);
   });
 
   if (!visible.length) {
     hint.hidden = false;
-    hint.textContent = 'Aucune conversation dans cette catégorie.';
+    hint.textContent = q
+      ? `Aucun message ne correspond à « ${q} ».`
+      : 'Aucune conversation dans cette catégorie.';
     return;
   }
 
@@ -922,6 +932,12 @@ document.getElementById('m-refresh').addEventListener('click', async () => {
     btn.textContent = '🔄 Rafraîchir la boîte';
     await loadInbox();
   }
+});
+
+document.getElementById('m-search')?.addEventListener('input', async (e) => {
+  inboxSearchQuery = e.target.value;
+  const { inboxCache, inboxDismissed = [] } = await chrome.storage.local.get(['inboxCache', 'inboxDismissed']);
+  renderInbox(inboxCache, new Set(inboxDismissed));
 });
 
 document.querySelectorAll('.inbox-filter').forEach(btn => {

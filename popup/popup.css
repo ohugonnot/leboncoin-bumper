@@ -29,13 +29,45 @@ body.fullpage {
   margin: 0 auto;
   min-height: 100vh;
 }
-/* Fullpage list heights : compromise between "see many cards" and "settings
-   reachable without 10s of scroll". Cap at ~75vh, internal scroll, page
-   scroll only when content below the list. */
+/* Fullpage list heights. The prospect panel is laid out as a flex column so
+   the settings (last child <details>) stay anchored at the bottom — no need
+   to scroll through 1000 results to reach them. The list scrolls internally. */
 body.fullpage .log { height: auto; min-height: 200px; max-height: 60vh; }
-body.fullpage .prospect-list,
 body.fullpage .inbox-list { max-height: 75vh; }
-body.fullpage .listings { max-height: none; }  /* bumper rarely has > 20 ads */
+body.fullpage .listings { max-height: none; }
+
+body.fullpage .panel[data-panel="prospect"].active {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 56px);  /* tabs + small breathing room */
+}
+body.fullpage .panel[data-panel="prospect"].active .prospect-list {
+  flex: 1 1 auto;
+  min-height: 180px;
+  max-height: none;
+  overflow-y: auto;
+}
+body.fullpage .panel[data-panel="prospect"].active > details.section {
+  flex: 0 0 auto;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+body.fullpage .panel[data-panel="prospect"].active > hr { flex: 0 0 auto; }
+
+.inbox-search {
+  margin-bottom: 10px;
+}
+.inbox-search input {
+  width: 100%;
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 7px 10px; font-size: 12.5px; font-family: inherit;
+  background: var(--bg); color: var(--ink);
+  transition: border-color .15s, box-shadow .15s;
+}
+.inbox-search input:focus {
+  outline: none; border-color: var(--orange);
+  box-shadow: 0 0 0 3px var(--orange-soft);
+}
 
 header {
   display: flex; align-items: center; justify-content: space-between;
