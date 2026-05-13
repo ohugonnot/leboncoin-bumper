@@ -4,6 +4,8 @@
 >
 > 🇫🇷 *100 % local, sans serveur tiers, sans abonnement. Multi-veilles, filtres avancés (prix, département, livraison, pro/particulier), template de réponse pré-rempli.*
 
+> ⚠️ **État : republier en mode RÉEL temporairement désactivé.** Leboncoin a refondu son wizard de dépôt en mai 2026 et le code de republish actuel échoue après le delete, ce qui supprimerait l'annonce. Le code force désormais le mode test (dry-run) tant que le wizard n'est pas adapté. **Les autres features (veille prospects, messages anti-scam, backup JSON, stats par annonce, Smart Bump) fonctionnent normalement.** Fix en cours, voir les [issues GitHub](https://github.com/ohugonnot/leboncoin-bumper/issues).
+
 <p align="center">
   <img src="docs/screenshots/prospect-hero.png" width="720" alt="Booster Leboncoin — onglet Prospects : veille multi-profil, scoring pondéré, ignore / contacter en un clic">
 </p>

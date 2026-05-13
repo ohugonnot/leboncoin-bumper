@@ -9,9 +9,24 @@ const LISTINGS_URL = `${LBC}/compte/part/mes-annonces`;
 const DEPOSIT_URL = `${LBC}/deposer-une-annonce`;
 const DASHBOARD_API = 'https://api.leboncoin.fr/api/dashboard/v1/search';
 
+// Leboncoin a refondu le wizard de dépôt (mai 2026) : la séquence n'est plus
+// monolithique mais step-by-step, et `input[type="file"]` n'apparaît qu'après
+// validation du titre + de la catégorie. repostListing actuel échoue après le
+// delete, laissant l'annonce perdue. Tant que repostListing n'est pas refait,
+// on force dry-run pour qu'aucun bump réel ne puisse partir et flinguer une
+// annonce. Flippe ce flag à false UNIQUEMENT après avoir adapté repostListing
+// au nouveau wizard.
+const BUMP_REAL_DISABLED = true;
+
 export async function runCycle({ trigger }) {
   const { settings } = await chrome.storage.local.get('settings');
   await log(`▶ Cycle started (${trigger}). dryRun=${settings.dryRun}, onlyAdIds=${JSON.stringify(settings.onlyAdIds)}`);
+  if (BUMP_REAL_DISABLED && !settings.dryRun) {
+    await log('⚠️ Bump réel temporairement désactivé : wizard de dépôt Leboncoin refondu (mai 2026), fix en cours.');
+    await log('   Le mode test (dry-run) reste utilisable pour valider le scrape. Aucune annonce n\'a été modifiée.');
+    await persistCycleResult({ trigger, count: 0, success: 0, failed: 0 });
+    return { ok: false, error: 'Bump réel temporairement désactivé', success: 0, failed: 0 };
+  }
 
   let tab;
   let success = 0, failed = 0;
