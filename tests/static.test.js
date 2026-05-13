@@ -102,6 +102,8 @@ describe('DOM IDs — cohérence HTML ↔ JS', () => {
       'b-help', 'b-selection-bar', 'b-history-section', 'b-planning-section', 'b-log-section',
       'b-bump-meta', 'm-help', 'panel-bumper', 'panel-messages', 'panel-prospect',
       'p-scan-limits-hint',
+      // Tab buttons — referenced via aria-labelledby on tabpanel sections, not getElementById
+      'tab-bumper', 'tab-messages', 'tab-prospect',
     ];
     const unexpected = unused.filter(id => !knownUnused.includes(id));
     // Fail si de nouveaux orphelins apparaissent (régression HTML)

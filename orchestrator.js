@@ -273,6 +273,8 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
       target: { tabId: tab.id },
       args: [keywords, maxAgeDays, adTypes, apiFilters],
       func: async (kws, maxAge, adTypesEnum, extra) => {
+        // Serialized into the tab context — cannot import from prospect.js.
+        // Same public key visible in every browser request to LBC.
         const API_URL = 'https://api.leboncoin.fr/finder/search';
         const API_KEY = 'ba0c2dad52b3ec';
         const ageDays = (iso) => {

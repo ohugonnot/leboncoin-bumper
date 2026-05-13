@@ -73,7 +73,9 @@ function renderInboxCard(conv, dismissed, { isArchived = false } = {}) {
   `;
 
   card.querySelector('.open-conv-btn').addEventListener('click', () => {
-    chrome.tabs.create({ url: `https://www.leboncoin.fr/messages/id/${conv.conversationId}` });
+    const cid = String(conv.conversationId || '').replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!cid) return;
+    chrome.tabs.create({ url: `https://www.leboncoin.fr/messages/id/${cid}` });
   });
 
   if (isArchived) {
