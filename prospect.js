@@ -166,27 +166,22 @@ export function sortEntries(entries) {
 }
 
 /**
- * Top-level scan: iterate keywords → score → dedup → sort.
+ * Pure post-processing : score → filter → dedup → sort.
  *
- * @param {object} [opts]
- * @param {string[]} [opts.keywords]
- * @param {number}   [opts.maxAgeDays=30]
- * @param {number}   [opts.minScore=5]
- * @param {Set<string>} [opts.seenIds]    IDs known to the user — flags isNew=false.
- * @param {Function} [opts.fetchFn]       Custom fetch (tests).
- * @returns {Promise<{results: object[], scannedKeywords: number, total: number}>}
+ * Split out from runProspectScan so the network phase (which must run inside
+ * a leboncoin tab to bypass DataDome) can stay separate from the scoring
+ * logic that remains testable in Node.
+ *
+ * @param {object} opts
+ * @param {Object<string, object[]>} opts.adsByKeyword  raw ads grouped by keyword
+ * @param {number} [opts.maxAgeDays=30]
+ * @param {number} [opts.minScore=5]
+ * @param {Set<string>} [opts.seenIds]
  */
-export async function runProspectScan({
-  keywords = DEFAULT_KEYWORDS,
-  maxAgeDays = 30,
-  minScore = 5,
-  seenIds = new Set(),
-  fetchFn
-} = {}) {
+export function processRawAds({ adsByKeyword, maxAgeDays = 30, minScore = 5, seenIds = new Set() }) {
   const byId = new Map();
-  for (const kw of keywords) {
-    const ads = await searchKeyword(kw, { maxAgeDays, fetchFn });
-    for (const ad of ads) {
+  for (const [kw, ads] of Object.entries(adsByKeyword)) {
+    for (const ad of ads || []) {
       const lid = String(ad.list_id || '');
       if (!lid) continue;
       const age = ageDays(ad.first_publication_date);
@@ -199,7 +194,27 @@ export async function runProspectScan({
     }
   }
   const results = sortEntries([...byId.values()]);
-  return { results, scannedKeywords: keywords.length, total: results.length };
+  return { results, scannedKeywords: Object.keys(adsByKeyword).length, total: results.length };
+}
+
+/**
+ * Top-level scan: iterate keywords → score → dedup → sort.
+ *
+ * Used by tests via `fetchFn` mock. Production calls `processRawAds` directly
+ * after fetching from a leboncoin tab (see orchestrator.fetchAdsViaTab).
+ */
+export async function runProspectScan({
+  keywords = DEFAULT_KEYWORDS,
+  maxAgeDays = 30,
+  minScore = 5,
+  seenIds = new Set(),
+  fetchFn
+} = {}) {
+  const adsByKeyword = {};
+  for (const kw of keywords) {
+    adsByKeyword[kw] = await searchKeyword(kw, { maxAgeDays, fetchFn });
+  }
+  return processRawAds({ adsByKeyword, maxAgeDays, minScore, seenIds });
 }
 
 /**
