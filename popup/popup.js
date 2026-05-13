@@ -58,11 +58,18 @@ const b = {
   log: document.getElementById('b-log'),
   listings: document.getElementById('b-listings'),
   refreshListings: document.getElementById('b-refresh-listings'),
-  listingsHint: document.getElementById('b-listings-hint')
+  selectionHint: document.getElementById('b-selection-hint'),
+  selectAll: document.getElementById('b-select-all'),
+  selectNone: document.getElementById('b-select-none'),
+  bumpProgress: document.getElementById('b-bump-progress'),
+  metaLast: document.getElementById('b-meta-last'),
+  metaNext: document.getElementById('b-meta-next'),
+  historyList: document.getElementById('b-history-list')
 };
 
 async function loadBumper() {
-  const { settings = {}, log = [], myListings } = await chrome.storage.local.get(['settings', 'log', 'myListings']);
+  const { settings = {}, log = [], myListings, lastBumpRun, bumpHistory = [] } =
+    await chrome.storage.local.get(['settings', 'log', 'myListings', 'lastBumpRun', 'bumpHistory']);
   b.enabled.checked = !!settings.enabled;
   b.dryRun.checked = settings.dryRun !== false;
   b.dayOfWeek.value = settings.dayOfWeek ?? 1;
@@ -72,20 +79,104 @@ async function loadBumper() {
   renderLog(log);
   renderListings(myListings, new Set(settings.onlyAdIds || []));
   updateActionHint();
+  renderBumpHistory(bumpHistory);
+
+  // Prefer SW status (has alarm info); fall back to local storage if SW not ready.
+  let statusRendered = false;
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'GET_BUMP_STATUS' });
+    if (r?.ok) { renderBumpStatus(r.result); statusRendered = true; }
+  } catch { /* SW not ready */ }
+  if (!statusRendered) renderBumpStatus({ lastRun: lastBumpRun || null, nextRunAt: null, scheduled: false });
 }
 
 function updateActionHint() {
   const hint = document.getElementById('b-action-hint');
-  const runBtn = document.getElementById('b-runNow');
+  const runBtn = b.runNow;
   if (b.dryRun.checked) {
     hint.innerHTML = '✓ <strong>Mode test actif</strong> : on simule, rien n\'est supprimé ni reposté.';
     hint.style.color = 'var(--green)';
-    runBtn.textContent = '↻ Tester (mode simulation)';
+    runBtn.textContent = '↻ Tester (rien ne sera touché)';
+    runBtn.classList.remove('danger');
   } else {
-    hint.innerHTML = '⚠️ <strong>Mode réel</strong> : tes annonces seront supprimées puis republiées.';
+    hint.innerHTML = '⚠️ <strong>Mode réel</strong> : les annonces cochées seront supprimées puis recréées sur Leboncoin.';
     hint.style.color = 'var(--red)';
-    runBtn.textContent = '↻ Republier maintenant';
+    runBtn.textContent = '🚨 Republier en RÉEL';
+    runBtn.classList.add('danger');
   }
+}
+
+function updateSelectionHint(stored, selectedIds) {
+  if (!stored?.listings?.length) {
+    b.selectionHint.textContent = '';
+    return;
+  }
+  const total = stored.listings.length;
+  const pausedCount = stored.listings.filter(l => /pause/i.test(l.status || '')).length;
+  const pausedSuffix = pausedCount ? ` (${pausedCount} en pause, ignorée${pausedCount > 1 ? 's' : ''})` : '';
+  const checked = stored.listings.filter(l => selectedIds.has(l.id)).length;
+  if (checked === 0) {
+    b.selectionHint.textContent = `0 cochée → Toutes les annonces seront republiées (${total} au total${pausedSuffix})`;
+  } else {
+    b.selectionHint.textContent = `${checked} / ${total} annonces sélectionnées${pausedSuffix}`;
+  }
+}
+
+function renderBumpStatus({ lastRun, nextRunAt, scheduled }) {
+  if (lastRun?.ts) {
+    const ago = timeAgo(new Date(lastRun.ts));
+    const parts = [];
+    if (lastRun.success != null) parts.push(`${lastRun.success} réussi${lastRun.success > 1 ? 's' : ''}`);
+    if (lastRun.failed != null && lastRun.failed > 0) parts.push(`${lastRun.failed} échec${lastRun.failed > 1 ? 's' : ''}`);
+    const detail = parts.length ? ` (${parts.join(', ')})` : '';
+    b.metaLast.textContent = `🕒 Dernier : ${ago}${detail}`;
+  } else {
+    b.metaLast.innerHTML = '🕒 Jamais lancé — clique sur <em>Tester</em> ou planifie en bas';
+  }
+
+  if (nextRunAt) {
+    const d = new Date(nextRunAt);
+    const label = d.toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    b.metaNext.textContent = `⏰ Prochain : ${label}`;
+  } else {
+    b.metaNext.textContent = '⏰ Aucun planning — section Planifier en bas';
+  }
+}
+
+function renderBumpHistory(history) {
+  if (!b.historyList) return;
+  if (!history?.length) {
+    b.historyList.innerHTML = '<div class="bump-history-empty">Aucun cycle enregistré.</div>';
+    return;
+  }
+  const rows = history.slice(0, 5).map(entry => {
+    const d = new Date(entry.ts);
+    const label = d.toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const ok = (entry.failed || 0) === 0;
+    const icon = ok ? '✅' : '❌';
+    const parts = [];
+    if (entry.success != null) parts.push(`${entry.success} réussi${entry.success > 1 ? 's' : ''}`);
+    if (entry.failed) parts.push(`${entry.failed} échec${entry.failed > 1 ? 's' : ''}`);
+    const detail = parts.join(' · ');
+    return `<div class="bump-history-entry">${icon} ${escapeHtml(label)} · ${escapeHtml(detail)}</div>`;
+  });
+  b.historyList.innerHTML = `<div class="bump-history-list">${rows.join('')}</div>`;
+}
+
+function updateBumpProgress(progress) {
+  if (!b.bumpProgress) return;
+  if (!progress) {
+    b.bumpProgress.hidden = true;
+    return;
+  }
+  const { adIndex, adTotal, adTitle, phase } = progress;
+  const pct = adTotal > 0 ? Math.round(adIndex / adTotal * 100) : 0;
+  const phaseLabel = { scrape: 'scrape', delete: 'suppression', repost: 'republication', done: 'terminé' }[phase] || phase;
+  b.bumpProgress.hidden = false;
+  b.bumpProgress.innerHTML = `
+    <div class="scan-progress-label">Republication en cours… annonce ${adIndex}/${adTotal} (${escapeHtml(adTitle || '')}) — ${phaseLabel}</div>
+    <div class="scan-progress-track"><div class="scan-progress-fill" style="width:${pct}%"></div></div>
+  `;
 }
 
 function renderLog(entries) {
@@ -99,7 +190,11 @@ function renderLog(entries) {
   b.log.scrollTop = b.log.scrollHeight;
 }
 
+// Cached reference to stored listings — needed for select-all / select-none
+let _currentStoredListings = null;
+
 function renderListings(stored, selectedIds) {
+  _currentStoredListings = stored;
   b.listings.innerHTML = '';
   if (!stored?.listings?.length) {
     const empty = document.createElement('div');
@@ -108,19 +203,14 @@ function renderListings(stored, selectedIds) {
       ? 'Aucune annonce trouvée. Es-tu connecté à leboncoin ?'
       : 'Clique ⟳ Charger pour récupérer tes annonces.';
     b.listings.appendChild(empty);
-    b.listingsHint.textContent = '';
+    updateSelectionHint(stored, selectedIds);
     return;
   }
-  const total = stored.listings.length;
-  const selected = stored.listings.filter(l => selectedIds.has(l.id)).length;
-  const when = stored.fetchedAt ? new Date(stored.fetchedAt) : null;
-  const ago = when ? timeAgo(when) : '';
-  b.listingsHint.innerHTML = selected === 0
-    ? `${total} annonces · <em>aucune cochée = toutes seront bumpées</em>${ago ? ` · MAJ ${ago}` : ''}`
-    : `<strong>${selected} / ${total}</strong> annonces sélectionnées${ago ? ` · MAJ ${ago}` : ''}`;
+
+  updateSelectionHint(stored, selectedIds);
 
   const pausedCount = stored.listings.filter(l => /pause/i.test(l.status || '')).length;
-  if (pausedCount === total) {
+  if (pausedCount === stored.listings.length) {
     const warn = document.createElement('div');
     warn.className = 'paused-banner';
     warn.innerHTML = `<strong>⏸ Toutes tes annonces sont en pause sur leboncoin.</strong><br>`
@@ -148,7 +238,7 @@ function renderListings(stored, selectedIds) {
       await chrome.storage.local.set({ settings: next });
       await chrome.runtime.sendMessage({ type: 'RESCHEDULE' });
       row.classList.toggle('checked', cb.checked);
-      renderListings(stored, ids);
+      updateSelectionHint(stored, ids);
     });
     row.appendChild(cb);
     if (it.thumbnail) {
@@ -158,8 +248,12 @@ function renderListings(stored, selectedIds) {
     }
     const body = document.createElement('div');
     body.className = 'listing-body';
+    const ageHtml = it.publishedAt
+      ? `<span class="listing-age">${timeAgo(new Date(it.publishedAt))}</span>`
+      : '';
     body.innerHTML = `
       <div class="listing-title" title="${escapeAttr(it.title)}">${escapeHtml(it.title || '(sans titre)')}</div>
+      ${ageHtml}
       <div class="listing-meta">
         ${it.status ? `<span class="status-badge ${classifyStatus(it.status)}">${escapeHtml(it.status)}</span>` : ''}
         <span class="listing-id">${escapeHtml(it.id)}</span>
@@ -231,13 +325,33 @@ b.clearLog.addEventListener('click', async () => {
   renderLog([]);
 });
 
+b.selectAll.addEventListener('click', async () => {
+  if (!_currentStoredListings?.listings?.length) return;
+  const { settings = {} } = await chrome.storage.local.get('settings');
+  const active = _currentStoredListings.listings.filter(l => !/pause/i.test(l.status || ''));
+  const ids = new Set(active.map(l => l.id));
+  const next = { ...settings, onlyAdIds: [...ids] };
+  await chrome.storage.local.set({ settings: next });
+  await chrome.runtime.sendMessage({ type: 'RESCHEDULE' });
+  renderListings(_currentStoredListings, ids);
+});
+
+b.selectNone.addEventListener('click', async () => {
+  if (!_currentStoredListings?.listings?.length) return;
+  const { settings = {} } = await chrome.storage.local.get('settings');
+  const next = { ...settings, onlyAdIds: [] };
+  await chrome.storage.local.set({ settings: next });
+  await chrome.runtime.sendMessage({ type: 'RESCHEDULE' });
+  renderListings(_currentStoredListings, new Set());
+});
+
 b.refreshListings.addEventListener('click', async () => {
   b.refreshListings.disabled = true;
   b.refreshListings.innerHTML = '<span class="spinner-inline"></span>';
   try {
     const r = await chrome.runtime.sendMessage({ type: 'REFRESH_LISTINGS' });
     if (!r?.ok) {
-      b.listingsHint.textContent = `Erreur : ${r?.error || 'inconnue'}`;
+      b.selectionHint.textContent = `Erreur : ${r?.error || 'inconnue'}`;
       return;
     }
     const { settings = {} } = await chrome.storage.local.get('settings');
@@ -838,6 +952,15 @@ chrome.storage.onChanged.addListener((changes) => {
   if (changes.prospectScanProgress) {
     updateScanProgress(changes.prospectScanProgress.newValue || null);
   }
+  if (changes.bumpProgress) {
+    updateBumpProgress(changes.bumpProgress.newValue || null);
+  }
+  if (changes.lastBumpRun || changes.bumpHistory) {
+    const lastRun = changes.lastBumpRun?.newValue || null;
+    const bumpHistory = changes.bumpHistory?.newValue || [];
+    if (lastRun) renderBumpStatus({ lastRun, nextRunAt: null, scheduled: false });
+    renderBumpHistory(bumpHistory);
+  }
   if (changes.prospectResultsByProfile
     || changes.prospectLastRunByProfile
     || changes.prospectSeenIdsByProfile
@@ -860,7 +983,8 @@ loadBumper();
 loadProspect();
 loadInbox();
 
-// Restore scan progress if popup is opened mid-scan
-chrome.storage.local.get('prospectScanProgress').then(({ prospectScanProgress }) => {
+// Restore in-progress states if popup is opened mid-operation
+chrome.storage.local.get(['prospectScanProgress', 'bumpProgress']).then(({ prospectScanProgress, bumpProgress }) => {
   if (prospectScanProgress) updateScanProgress(prospectScanProgress);
+  if (bumpProgress) updateBumpProgress(bumpProgress);
 });

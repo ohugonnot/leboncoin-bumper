@@ -11,6 +11,7 @@ export async function runCycle({ trigger }) {
   await log(`▶ Cycle started (${trigger}). dryRun=${settings.dryRun}, onlyAdIds=${JSON.stringify(settings.onlyAdIds)}`);
 
   let tab;
+  let success = 0, failed = 0;
   try {
     tab = await chrome.tabs.create({ url: LISTINGS_URL, active: true });
     await waitForTabLoad(tab.id);
@@ -32,38 +33,67 @@ export async function runCycle({ trigger }) {
 
     if (!targets.length) {
       await log('Aucune annonce à traiter. Rien à faire.');
+      await persistCycleResult({ trigger, count: 0, success: 0, failed: 0 });
       return { ok: true, processed: 0, skipped: paused.length };
     }
 
-    for (const target of targets) {
+    const total = targets.length;
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i];
+      await chrome.storage.local.set({
+        bumpProgress: { adIndex: i + 1, adTotal: total, adTitle: target.title, phase: 'scrape', at: Date.now() }
+      });
       await log(`— Listing ${target.id} ("${target.title.slice(0, 40)}", cat=${target.catSlug})`);
-      const data = await scrapeEditPage(tab.id, target.id);
-      data.catSlug = target.catSlug;
-      await log(`  scraped: ${data.photos.length} photos, ${data.body.length} body chars`);
+      try {
+        const data = await scrapeEditPage(tab.id, target.id);
+        data.catSlug = target.catSlug;
+        await log(`  scraped: ${data.photos.length} photos, ${data.body.length} body chars`);
 
-      if (settings.dryRun) {
-        await log('  [dry-run] would delete + repost. Skipping.');
-        continue;
+        if (settings.dryRun) {
+          await log('  [dry-run] would delete + repost. Skipping.');
+          success++;
+          continue;
+        }
+
+        await chrome.storage.local.set({
+          bumpProgress: { adIndex: i + 1, adTotal: total, adTitle: target.title, phase: 'delete', at: Date.now() }
+        });
+        await deleteListing(tab.id, target.id);
+        await log('  deleted.');
+
+        await chrome.storage.local.set({
+          bumpProgress: { adIndex: i + 1, adTotal: total, adTitle: target.title, phase: 'repost', at: Date.now() }
+        });
+        await repostListing(tab.id, data);
+        await log('  reposted (in moderation).');
+        success++;
+      } catch (itemErr) {
+        failed++;
+        await log(`  ✗ failed: ${itemErr.message}`);
       }
-
-      await deleteListing(tab.id, target.id);
-      await log('  deleted.');
-
-      await repostListing(tab.id, data);
-      await log('  reposted (in moderation).');
     }
 
-    await log(`✓ Cycle done. ${targets.length} processed.`);
-    return { ok: true, processed: targets.length };
+    await log(`✓ Cycle done. ${success} success, ${failed} failed.`);
+    await persistCycleResult({ trigger, count: total, success, failed });
+    return { ok: true, processed: total, success, failed };
   } catch (err) {
     await log(`✗ Cycle failed: ${err.message}`);
-    return { ok: false, error: err.message };
+    await persistCycleResult({ trigger, count: 0, success, failed });
+    return { ok: false, error: err.message, success, failed };
   } finally {
+    await chrome.storage.local.remove('bumpProgress');
     if (tab?.id) {
       const { settings: s } = await chrome.storage.local.get('settings');
       if (!s.dryRun) await chrome.tabs.remove(tab.id).catch(() => {});
     }
   }
+}
+
+async function persistCycleResult({ trigger, count, success, failed }) {
+  const lastRun = { ts: Date.now(), trigger, count, success, failed };
+  const { bumpHistory = [] } = await chrome.storage.local.get('bumpHistory');
+  const nextHistory = [lastRun, ...bumpHistory].slice(0, 20);
+  await chrome.storage.local.set({ lastBumpRun: lastRun, bumpHistory: nextHistory });
 }
 
 // ---- Scrape ---------------------------------------------------------------

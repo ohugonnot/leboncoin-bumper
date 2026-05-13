@@ -173,6 +173,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const out = await listUserAds();
         await chrome.storage.local.set({ myListings: out });
         respond({ ok: true, result: out });
+      } else if (msg.type === 'GET_BUMP_STATUS') {
+        const { lastBumpRun } = await chrome.storage.local.get('lastBumpRun');
+        const alarm = await chrome.alarms.get(BUMP_ALARM);
+        respond({ ok: true, result: {
+          lastRun: lastBumpRun || null,
+          nextRunAt: alarm?.scheduledTime || null,
+          scheduled: !!alarm
+        }});
       } else if (msg.type === 'OPEN_REPLY_FORM') {
         await openReplyForm(msg.listId, msg.message);
         respond({ ok: true });
