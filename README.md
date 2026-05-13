@@ -74,8 +74,13 @@ Tout tourne dans ton navigateur. **Aucune donnée ne quitte ta machine.** Pas de
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/bumper.png" width="480" alt="Onglet Bumper — sélecteur d'annonces, Mode test, planning hebdomadaire">
-  <br><em>Onglet Bumper : sélection visuelle, mode test, planning hebdomadaire</em>
+  <img src="docs/screenshots/bumper.png" width="720" alt="Onglet Republier — sélecteur d'annonces, stats par annonce (vues/favoris/contacts), Smart Bump, backup JSON">
+  <br><em>Onglet Republier : sélection visuelle, stats vues/favoris/contacts, Smart Bump au pic d'affluence, backup JSON local</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/messages.png" width="720" alt="Onglet Messages — filtre anti-scam, classement scam/lead/question/spam, recherche">
+  <br><em>Onglet Messages : classification automatique anti-scam, filtres et recherche dans la boîte de réception</em>
 </p>
 
 ## Installation
