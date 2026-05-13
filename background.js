@@ -167,7 +167,9 @@ async function doProspectScan(trigger) {
   const out = processRawAds({
     adsByKeyword, maxAgeDays, minScore,
     seenIds: seen, contactedIds: allContacted,
-    profileKeywords: keywords
+    profileKeywords: keywords,
+    ownerType: profile.ownerType || 'all',
+    shippableOnly: !!profile.shippableOnly
   });
   await chrome.storage.local.set({
     prospectResultsByProfile: { ...prospectResultsByProfile, [profile.id]: out.results },
@@ -196,6 +198,8 @@ async function profileCreate(name) {
     departments: [],     // array of FR dept codes (strings : "25", "2A", "75")
     sortBy: 'time',      // 'time' | 'price'
     sortOrder: 'desc',   // 'asc' | 'desc'
+    ownerType: 'all',    // 'all' | 'pro' | 'private'
+    shippableOnly: false,
     replyTemplate: ''
   };
   await chrome.storage.local.set({
