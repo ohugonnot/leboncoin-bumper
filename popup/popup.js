@@ -239,15 +239,23 @@ b.refreshListings.addEventListener('click', async () => {
 import { DEFAULT_REPLY_TEMPLATE, formatReplyTemplate } from '../prospect.js';
 
 const p = {
+  // Global settings (apply to all profiles)
   enabled: document.getElementById('p-enabled'),
   dayOfWeek: document.getElementById('p-dayOfWeek'),
   hour: document.getElementById('p-hour'),
+  notifyOnNew: document.getElementById('p-notifyOnNew'),
+  notifyMinScore: document.getElementById('p-notifyMinScore'),
+  // Per-profile settings
   minScore: document.getElementById('p-minScore'),
   maxAgeDays: document.getElementById('p-maxAgeDays'),
   keywords: document.getElementById('p-keywords'),
-  notifyOnNew: document.getElementById('p-notifyOnNew'),
-  notifyMinScore: document.getElementById('p-notifyMinScore'),
   replyTemplate: document.getElementById('p-replyTemplate'),
+  // Profile picker
+  profileSelect: document.getElementById('p-profile-select'),
+  profileAdd: document.getElementById('p-profile-add'),
+  profileRename: document.getElementById('p-profile-rename'),
+  profileDelete: document.getElementById('p-profile-delete'),
+  // Actions + render targets
   scan: document.getElementById('p-scan'),
   markSeen: document.getElementById('p-mark-seen'),
   list: document.getElementById('p-list'),
@@ -257,18 +265,42 @@ const p = {
 };
 
 async function loadProspect() {
-  const { prospectSettings = {}, prospectResults = [], prospectLastRun, prospectSeenIds = [], prospectIgnoredIds = [] } =
-    await chrome.storage.local.get(['prospectSettings', 'prospectResults', 'prospectLastRun', 'prospectSeenIds', 'prospectIgnoredIds']);
-  p.enabled.checked = !!prospectSettings.enabled;
-  p.dayOfWeek.value = prospectSettings.dayOfWeek ?? 1;
-  p.hour.value = prospectSettings.hour ?? 10;
-  p.minScore.value = prospectSettings.minScore ?? 5;
-  p.maxAgeDays.value = prospectSettings.maxAgeDays ?? 30;
-  p.keywords.value = (prospectSettings.keywords || []).join('\n');
-  p.notifyOnNew.checked = prospectSettings.notifyOnNew !== false;
-  p.notifyMinScore.value = prospectSettings.notifyMinScore ?? 7;
-  p.replyTemplate.value = prospectSettings.replyTemplate ?? DEFAULT_REPLY_TEMPLATE;
-  renderProspects(prospectResults, prospectLastRun, new Set(prospectSeenIds), new Set(prospectIgnoredIds));
+  const s = await chrome.storage.local.get([
+    'prospectProfiles', 'activeProfileId', 'prospectGlobalSettings',
+    'prospectResultsByProfile', 'prospectLastRunByProfile',
+    'prospectSeenIdsByProfile', 'prospectIgnoredIdsByProfile'
+  ]);
+  const profiles = s.prospectProfiles || [];
+  if (!profiles.length) return;  // migration not run yet
+  const activeId = s.activeProfileId || profiles[0].id;
+  const profile = profiles.find(x => x.id === activeId) || profiles[0];
+  const global = s.prospectGlobalSettings || {};
+
+  // Profile dropdown
+  p.profileSelect.innerHTML = profiles.map(pr =>
+    `<option value="${escapeAttr(pr.id)}" ${pr.id === profile.id ? 'selected' : ''}>${escapeHtml(pr.name)}</option>`
+  ).join('');
+  p.profileDelete.disabled = profiles.length <= 1;
+
+  // Global settings
+  p.enabled.checked = !!global.enabled;
+  p.dayOfWeek.value = global.dayOfWeek ?? 1;
+  p.hour.value = global.hour ?? 10;
+  p.notifyOnNew.checked = global.notifyOnNew !== false;
+  p.notifyMinScore.value = global.notifyMinScore ?? 7;
+
+  // Per-profile settings
+  p.minScore.value = profile.minScore ?? 5;
+  p.maxAgeDays.value = profile.maxAgeDays ?? 30;
+  p.keywords.value = (profile.keywords || []).join('\n');
+  p.replyTemplate.value = profile.replyTemplate || DEFAULT_REPLY_TEMPLATE;
+
+  // Render results for active profile
+  const results = s.prospectResultsByProfile?.[profile.id] || [];
+  const lastRun = s.prospectLastRunByProfile?.[profile.id] || null;
+  const seen = new Set(s.prospectSeenIdsByProfile?.[profile.id] || []);
+  const ignored = new Set(s.prospectIgnoredIdsByProfile?.[profile.id] || []);
+  renderProspects(results, lastRun, seen, ignored);
 }
 
 function renderProspects(results, lastRun, seenSet, ignoredSet = new Set()) {
@@ -326,15 +358,23 @@ function renderProspects(results, lastRun, seenSet, ignoredSet = new Set()) {
 }
 
 async function onIgnore(prospect) {
-  const { prospectIgnoredIds = [] } = await chrome.storage.local.get('prospectIgnoredIds');
-  const next = new Set(prospectIgnoredIds);
+  const { prospectIgnoredIdsByProfile = {}, activeProfileId } = await chrome.storage.local.get(['prospectIgnoredIdsByProfile', 'activeProfileId']);
+  const next = new Set(prospectIgnoredIdsByProfile[activeProfileId] || []);
   next.add(prospect.list_id);
-  await chrome.storage.local.set({ prospectIgnoredIds: [...next].slice(-5000) });
+  await chrome.storage.local.set({
+    prospectIgnoredIdsByProfile: {
+      ...prospectIgnoredIdsByProfile,
+      [activeProfileId]: [...next].slice(-5000)
+    }
+  });
   await loadProspect();
 }
 
 async function onRestoreIgnored() {
-  await chrome.storage.local.set({ prospectIgnoredIds: [] });
+  const { prospectIgnoredIdsByProfile = {}, activeProfileId } = await chrome.storage.local.get(['prospectIgnoredIdsByProfile', 'activeProfileId']);
+  await chrome.storage.local.set({
+    prospectIgnoredIdsByProfile: { ...prospectIgnoredIdsByProfile, [activeProfileId]: [] }
+  });
   await loadProspect();
 }
 
@@ -367,24 +407,60 @@ function showToast(msg) {
 }
 
 async function saveProspect() {
-  const prospectSettings = {
+  const { prospectProfiles = [], activeProfileId } = await chrome.storage.local.get(['prospectProfiles', 'activeProfileId']);
+  const nextProfiles = prospectProfiles.map(pr => pr.id === activeProfileId ? {
+    ...pr,
+    keywords: p.keywords.value.split('\n').map(s => s.trim()).filter(Boolean),
+    minScore: +p.minScore.value,
+    maxAgeDays: +p.maxAgeDays.value,
+    replyTemplate: p.replyTemplate.value
+  } : pr);
+  const prospectGlobalSettings = {
     enabled: p.enabled.checked,
     dayOfWeek: +p.dayOfWeek.value,
     hour: +p.hour.value,
     minute: 0,
-    minScore: +p.minScore.value,
-    maxAgeDays: +p.maxAgeDays.value,
-    keywords: p.keywords.value.split('\n').map(s => s.trim()).filter(Boolean),
     notifyOnNew: p.notifyOnNew.checked,
-    notifyMinScore: +p.notifyMinScore.value,
-    replyTemplate: p.replyTemplate.value
+    notifyMinScore: +p.notifyMinScore.value
   };
-  await chrome.storage.local.set({ prospectSettings });
+  await chrome.storage.local.set({
+    prospectProfiles: nextProfiles,
+    prospectGlobalSettings
+  });
   await chrome.runtime.sendMessage({ type: 'RESCHEDULE_PROSPECT' });
 }
 [p.enabled, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate].forEach(el => {
   el.addEventListener('change', saveProspect);
   el.addEventListener('blur', saveProspect);
+});
+
+// Profile picker actions
+p.profileSelect.addEventListener('change', async () => {
+  await chrome.runtime.sendMessage({ type: 'PROFILE_SET_ACTIVE', id: p.profileSelect.value });
+  await loadProspect();
+});
+p.profileAdd.addEventListener('click', async () => {
+  const name = prompt('Nom de la nouvelle veille :', 'Nouvelle veille');
+  if (!name) return;
+  await chrome.runtime.sendMessage({ type: 'PROFILE_CREATE', name });
+  await loadProspect();
+});
+p.profileRename.addEventListener('click', async () => {
+  const { prospectProfiles = [], activeProfileId } = await chrome.storage.local.get(['prospectProfiles', 'activeProfileId']);
+  const cur = prospectProfiles.find(pr => pr.id === activeProfileId);
+  if (!cur) return;
+  const name = prompt('Nouveau nom :', cur.name);
+  if (!name || name === cur.name) return;
+  await chrome.runtime.sendMessage({ type: 'PROFILE_RENAME', id: activeProfileId, name });
+  await loadProspect();
+});
+p.profileDelete.addEventListener('click', async () => {
+  const { prospectProfiles = [], activeProfileId } = await chrome.storage.local.get(['prospectProfiles', 'activeProfileId']);
+  if (prospectProfiles.length <= 1) return showToast('Impossible : il faut au moins une veille');
+  const cur = prospectProfiles.find(pr => pr.id === activeProfileId);
+  if (!confirm(`Supprimer la veille "${cur?.name}" et tous ses résultats ?`)) return;
+  await chrome.runtime.sendMessage({ type: 'PROFILE_DELETE', id: activeProfileId });
+  await loadProspect();
 });
 
 p.scan.addEventListener('click', async () => {
@@ -400,8 +476,9 @@ p.scan.addEventListener('click', async () => {
 });
 
 p.markSeen.addEventListener('click', async () => {
-  const { prospectResults = [] } = await chrome.storage.local.get('prospectResults');
-  await chrome.runtime.sendMessage({ type: 'MARK_PROSPECTS_SEEN', results: prospectResults });
+  const { prospectResultsByProfile = {}, activeProfileId } = await chrome.storage.local.get(['prospectResultsByProfile', 'activeProfileId']);
+  const results = prospectResultsByProfile[activeProfileId] || [];
+  await chrome.runtime.sendMessage({ type: 'MARK_PROSPECTS_SEEN', results });
   await loadProspect();
 });
 
