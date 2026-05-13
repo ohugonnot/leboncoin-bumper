@@ -213,3 +213,31 @@ export async function markResultsSeen(results) {
   // Keep history bounded to avoid runaway growth.
   await chrome.storage.local.set({ prospectSeenIds: [...next].slice(-5000) });
 }
+
+export const DEFAULT_REPLY_TEMPLATE = (
+  "Bonjour,\n\n" +
+  "Je suis Odilon, développeur full-stack basé à Besançon (PHP/Symfony, JS/TS, Go), 10+ ans d'expérience.\n" +
+  "Votre annonce \"{subject}\" m'intéresse — {keyword} fait partie de mes spécialités.\n\n" +
+  "Je peux vous aider rapidement, à distance ou sur site selon le besoin.\n" +
+  "Mon profil : https://www.web-developpeur.com\n\n" +
+  "Cordialement,\n" +
+  "Odilon"
+);
+
+/**
+ * Fill placeholders in a reply template using a prospect entry.
+ * Supported: {subject}, {keyword}, {location}, {age_days}.
+ * Unknown placeholders are left untouched so users can spot typos.
+ */
+export function formatReplyTemplate(template, prospect) {
+  if (!template) return '';
+  const map = {
+    subject: prospect?.subject || '',
+    keyword: (prospect?.kw_hit || '').replace(/^#/, ''),
+    location: prospect?.location || '',
+    age_days: prospect?.age_days != null ? `${prospect.age_days}j` : ''
+  };
+  return template.replace(/\{(\w+)\}/g, (full, key) =>
+    Object.prototype.hasOwnProperty.call(map, key) ? map[key] : full
+  );
+}
