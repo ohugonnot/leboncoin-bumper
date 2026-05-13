@@ -295,6 +295,7 @@ function renderProspects(results, lastRun, seenSet, ignoredSet = new Set()) {
       <div class="card-top">
         <a class="card-title" href="${escapeAttr(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.subject)}</a>
         ${isNew ? '<span class="badge new">NOUV.</span>' : ''}
+        ${r.already_contacted ? '<span class="badge contacted" title="Tu as déjà une conversation avec cette annonce">✉ DÉJÀ</span>' : ''}
         <span class="badge score" title="Score de pertinence">★ ${r.score}</span>
       </div>
       <div class="card-meta">
@@ -305,7 +306,7 @@ function renderProspects(results, lastRun, seenSet, ignoredSet = new Set()) {
       <div class="card-body">${escapeHtml((r.body || '').slice(0, 200))}</div>
       <div class="card-actions">
         <button class="btn ghost small ignore-btn" data-id="${escapeAttr(r.list_id)}" title="Masquer définitivement (ne reviendra pas dans les prochains scans)">✗ Ignorer</button>
-        <button class="btn ghost small contact-btn" data-id="${escapeAttr(r.list_id)}">✉ Contacter</button>
+        <button class="btn ghost small contact-btn" data-id="${escapeAttr(r.list_id)}" ${r.already_contacted ? 'title="Tu as déjà contacté — ouvre /reply pour relancer"' : ''}>✉ ${r.already_contacted ? 'Relancer' : 'Contacter'}</button>
       </div>
     `;
     card.querySelector('.contact-btn').addEventListener('click', () => onContact(r));
@@ -341,13 +342,13 @@ async function onContact(prospect) {
   const { prospectSettings = {} } = await chrome.storage.local.get('prospectSettings');
   const template = prospectSettings.replyTemplate || DEFAULT_REPLY_TEMPLATE;
   const filled = formatReplyTemplate(template, prospect);
-  try {
-    await navigator.clipboard.writeText(filled);
-    showToast('Template copié dans le presse-papier');
-  } catch {
-    showToast('Impossible de copier — vérifie les permissions du presse-papier');
-  }
-  if (prospect.url) chrome.tabs.create({ url: prospect.url });
+  // Pass the filled message to background, which opens /reply/{id} and injects it.
+  await chrome.runtime.sendMessage({
+    type: 'OPEN_REPLY_FORM',
+    listId: prospect.list_id,
+    message: filled
+  });
+  showToast('Formulaire de réponse ouvert — vérifie et clique Envoyer');
 }
 
 let toastTimer = null;

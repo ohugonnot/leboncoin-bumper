@@ -2,7 +2,7 @@
 //   - lbc-weekly-bump: deletes & reposts the user's own listings.
 //   - lbc-weekly-prospect: scans leboncoin demands matching the user's tech profile.
 
-import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab } from './orchestrator.js';
+import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm } from './orchestrator.js';
 import { processRawAds, markResultsSeen, DEFAULT_KEYWORDS } from './prospect.js';
 
 const BUMP_ALARM = 'lbc-weekly-bump';
@@ -81,6 +81,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       } catch (e) {
         sendResponse({ ok: false, error: e.message });
       }
+    } else if (msg.type === 'OPEN_REPLY_FORM') {
+      try {
+        await openReplyForm(msg.listId, msg.message);
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
     }
   })();
   return true;
@@ -93,8 +100,11 @@ async function doProspectScan(trigger) {
   const maxAgeDays = prospectSettings.maxAgeDays || 30;
   const minScore = prospectSettings.minScore || 5;
   // Fetch routed through a leboncoin tab — direct SW fetch is 403'd by DataDome.
-  const adsByKeyword = await fetchAdsViaTab(keywords, maxAgeDays);
-  const out = processRawAds({ adsByKeyword, maxAgeDays, minScore, seenIds: seen });
+  const { adsByKeyword, contactedAdIds = [] } = await fetchAdsViaTab(keywords, maxAgeDays);
+  const out = processRawAds({
+    adsByKeyword, maxAgeDays, minScore,
+    seenIds: seen, contactedIds: new Set(contactedAdIds)
+  });
   await chrome.storage.local.set({
     prospectResults: out.results,
     prospectLastRun: { ts: new Date().toISOString(), trigger, total: out.total, scanned: out.scannedKeywords }

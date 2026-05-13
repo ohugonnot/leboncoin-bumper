@@ -231,6 +231,7 @@ header .meta { font-size: 11px; color: var(--ink-soft); }
 }
 .badge.score { background: var(--orange-soft); color: var(--orange); }
 .badge.new { background: #d8f4e3; color: var(--green); }
+.badge.contacted { background: #e5e7f4; color: #4f5dba; }
 
 .card-meta {
   display: flex; gap: 10px; align-items: center;

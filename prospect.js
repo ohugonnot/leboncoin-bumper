@@ -178,7 +178,10 @@ export function sortEntries(entries) {
  * @param {number} [opts.minScore=5]
  * @param {Set<string>} [opts.seenIds]
  */
-export function processRawAds({ adsByKeyword, maxAgeDays = 30, minScore = 5, seenIds = new Set() }) {
+export function processRawAds({
+  adsByKeyword, maxAgeDays = 30, minScore = 5,
+  seenIds = new Set(), contactedIds = new Set()
+}) {
   const byId = new Map();
   for (const [kw, ads] of Object.entries(adsByKeyword)) {
     for (const ad of ads || []) {
@@ -189,6 +192,7 @@ export function processRawAds({ adsByKeyword, maxAgeDays = 30, minScore = 5, see
       const score = scoreAd(ad.subject || '', ad.body || '');
       if (score < minScore) continue;
       const entry = buildEntry(ad, { score, kw, isNew: !seenIds.has(lid) });
+      entry.already_contacted = contactedIds.has(lid);
       const prev = byId.get(lid);
       if (!prev || prev.score < score) byId.set(lid, entry);
     }
