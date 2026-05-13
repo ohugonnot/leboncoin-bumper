@@ -128,10 +128,15 @@
       <summary><h2 class="section-title">⚙️ Réglages de cette veille</h2></summary>
 
       <div class="score-help">
-        <strong>Comment marche le score ?</strong>
-        Chaque annonce reçoit un score <strong>★</strong> = nombre de tes mots-clés trouvés dans l'annonce (titre + description), +1 si elle commence par <em>Cherche / Recherche / Besoin</em>.<br>
-        Exemple avec keywords <code>wordpress, php, prestashop</code> : "Cherche dev WordPress + PHP" → ★ 3 (2 keywords + bonus).<br>
-        <strong>Score min</strong> = filtre d'affichage. <strong>Notif si score ≥</strong> = seuil pour t'alerter par notif.
+        <strong>Comment marche le score ★ ?</strong>
+        <ul>
+          <li>Chaque mot-clé matché dans le <strong>titre</strong> → <code>+2 × poids</code></li>
+          <li>Matché seulement dans la <strong>description</strong> → <code>+1 × poids</code></li>
+          <li>Le titre contient <em>cherche / recherche / besoin / aide / demande / quelqu'un / conseil</em> → <code>+1</code></li>
+        </ul>
+        Poids par défaut : 1. Pour booster un mot-clé important, écris <code>recalbox:3</code> (poids 3).<br>
+        <strong>Survole le ★ d'une carte</strong> pour voir le détail du calcul.<br>
+        <strong>Score min</strong> = filtre d'affichage. <strong>Notif si score ≥</strong> = seuil pour t'alerter.
       </div>
 
       <label class="toggle">
@@ -185,8 +190,8 @@
       </div>
 
       <div class="field" style="margin-top: 10px;">
-        <label>Mots-clés <span class="muted">(un par ligne)</span></label>
-        <textarea id="p-keywords" rows="6" style="resize: vertical; min-height: 90px;" placeholder="wordpress&#10;prestashop&#10;…"></textarea>
+        <label>Mots-clés <span class="muted">(un par ligne, syntaxe avancée : <code>recalbox:3</code> pour poids 3)</span></label>
+        <textarea id="p-keywords" rows="6" style="resize: vertical; min-height: 90px;" placeholder="wordpress&#10;prestashop&#10;recalbox:3&#10;…"></textarea>
       </div>
 
       <div class="field" style="margin-top: 10px;">

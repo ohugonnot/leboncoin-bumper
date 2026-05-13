@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {
   scoreAd, ageDays, buildSearchPayload, buildEntry,
   sortEntries, runProspectScan, formatReplyTemplate,
-  STRONG_SIGNALS, MODERATE_SIGNALS, NEG_SIGNALS, DEMAND_PREFIX
+  parseProfileKeywords, explainScore,
+  STRONG_SIGNALS, MODERATE_SIGNALS, NEG_SIGNALS, DEMAND_PREFIX, DEMAND_HINTS
 } from '../prospect.js';
 import {
   adWordpressMetz, adProgrammeurN8N, adCleaner,
@@ -201,14 +202,59 @@ test('formatReplyTemplate: returns empty string for empty template', () => {
 
 // ─── scoreAd: keyword-match mode (new dynamic scoring) ────────────────────
 
-test('scoreAd: keyword-match counts distinct keywords + demand bonus', () => {
+test('scoreAd v2: title match weighs 2x body match', () => {
+  // wordpress in title = +2, prestashop in title = +2, php in body = +1, Cherche detected = +1
   const s = scoreAd(
     'Cherche dev WordPress + PrestaShop urgent',
     'Site existant, besoin de migration PHP 8.',
     ['wordpress', 'prestashop', 'php']
   );
-  // wordpress + prestashop in title (2), php in body (1), Cherche prefix (+1) = 4
-  assert.equal(s, 4);
+  assert.equal(s, 6);
+});
+
+test('scoreAd v2: per-keyword weight via :N syntax', () => {
+  const s = scoreAd('Recalbox setup help', '', ['recalbox:3']);
+  // recalbox in title with weight 3 = +6, no demand hint in title = 0
+  // "help" is not a demand hint, only French words
+  assert.equal(s, 6);
+});
+
+test('scoreAd v2: demand bonus triggers anywhere in title', () => {
+  // "Particulier cherche..." — Cherche is not at start
+  const s = scoreAd('Particulier cherche dev WordPress', '', ['wordpress']);
+  // wordpress title +2 + cherche anywhere = +1 = 3
+  assert.equal(s, 3);
+});
+
+test('scoreAd v2: body match only counted if not in title', () => {
+  const s = scoreAd('WordPress problème', 'WordPress et PHP', ['wordpress', 'php']);
+  // wordpress in title (+2), php in body (+1) = 3
+  assert.equal(s, 3);
+});
+
+test('parseProfileKeywords: parses :N syntax and clamps weights', () => {
+  const out = parseProfileKeywords(['wordpress', 'recalbox:3', '  batocera : 5 ', 'too:99', 'php:0', 'x']);
+  // 'x' (1 char) is dropped because too short
+  assert.deepEqual(out, [
+    { term: 'wordpress', weight: 1 },
+    { term: 'recalbox', weight: 3 },
+    { term: 'batocera', weight: 5 },
+    { term: 'too', weight: 10 },  // clamped to max 10
+    { term: 'php', weight: 1 }    // weight 0 falls back to default 1
+  ]);
+});
+
+test('explainScore: returns per-keyword breakdown for tooltip', () => {
+  const r = explainScore(
+    'Cherche dev WordPress + PrestaShop',
+    'PHP migration',
+    ['wordpress', 'prestashop:2', 'php']
+  );
+  assert.equal(r.total, 2 + 4 + 1 + 1);  // wordpress titre + prestashop titre×2 + php body + demande
+  assert.ok(r.parts.includes('wordpress (titre +2)'));
+  assert.ok(r.parts.includes('prestashop (titre +4)'));
+  assert.ok(r.parts.includes('php (description +1)'));
+  assert.ok(r.parts.some(p => p.includes('demande')));
 });
 
 test('scoreAd: keyword-match ignores ads with NEG_SIGNALS', () => {
@@ -235,6 +281,6 @@ test('scoreAd: keyword-match empty array gives only demand bonus', () => {
 
 test('scoreAd: keyword-match skips too-short keywords (<2 chars)', () => {
   const s = scoreAd('php is the best', 'long enough body php php php', ['p', 'php']);
-  // 'p' is too short (1 char), only 'php' counts. Not a demand title, no bonus.
-  assert.equal(s, 1);
+  // 'p' is too short (1 char) → filtered. 'php' in title → +2. No demand. Total 2.
+  assert.equal(s, 2);
 });
