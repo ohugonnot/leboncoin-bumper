@@ -263,9 +263,14 @@ header .meta { font-size: 11px; color: var(--ink-soft); }
 
 .card-body {
   font-size: 11px; color: var(--ink-soft); line-height: 1.4;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
   overflow: hidden; text-overflow: ellipsis;
 }
+
+.card-meta .price {
+  font-weight: 600; color: var(--orange);
+}
+.card-meta .price::before { content: "💰 "; opacity: 0.6; }
 
 .spinner-inline {
   display: inline-block; width: 11px; height: 11px;

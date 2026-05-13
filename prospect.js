@@ -200,12 +200,17 @@ export async function searchKeyword(keyword, { maxAgeDays = 30, fetchFn = (typeo
  * @param {object} extras {score, kw, isNew}
  */
 export function buildEntry(ad, { score, kw, isNew }) {
+  // Price : leboncoin exposes `price` as an array (often [N]) or sometimes
+  // missing for "demande" ads. We keep the first value if any.
+  const priceArr = Array.isArray(ad.price) ? ad.price : (ad.price != null ? [ad.price] : []);
+  const price = priceArr.length ? Number(priceArr[0]) : null;
   return {
     list_id: String(ad.list_id || ''),
     subject: ad.subject,
-    body: (ad.body || '').slice(0, 600),
+    body: (ad.body || '').slice(0, 1200),
     category_name: ad.category_name,
     url: ad.url,
+    price: Number.isFinite(price) && price > 0 ? price : null,
     location: `${ad.location?.city || '?'} ${ad.location?.zipcode || ''}`.trim(),
     first_publication_date: ad.first_publication_date,
     age_days: Math.round(ageDays(ad.first_publication_date) ?? 0),
