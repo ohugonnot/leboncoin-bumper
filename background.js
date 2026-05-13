@@ -137,12 +137,14 @@ async function doProspectScan(trigger) {
     prospectProfiles = [], activeProfileId,
     prospectGlobalSettings = {},
     prospectSeenIdsByProfile = {},
+    prospectIgnoredIdsByProfile = {},
     prospectResultsByProfile = {},
     prospectLastRunByProfile = {},
     prospectContactedLocal = []
   } = await chrome.storage.local.get([
     'prospectProfiles', 'activeProfileId', 'prospectGlobalSettings',
-    'prospectSeenIdsByProfile', 'prospectResultsByProfile', 'prospectLastRunByProfile',
+    'prospectSeenIdsByProfile', 'prospectIgnoredIdsByProfile',
+    'prospectResultsByProfile', 'prospectLastRunByProfile',
     'prospectContactedLocal'
   ]);
   const profile = prospectProfiles.find(p => p.id === activeProfileId) || prospectProfiles[0];
@@ -178,7 +180,8 @@ async function doProspectScan(trigger) {
       [profile.id]: { ts: new Date().toISOString(), trigger, total: out.total, scanned: out.scannedKeywords }
     }
   });
-  await maybeNotify(out.results, seen, prospectGlobalSettings, profile);
+  const ignored = new Set(prospectIgnoredIdsByProfile[profile.id] || []);
+  await maybeNotify(out.results, seen, prospectGlobalSettings, profile, ignored);
   return out;
 }
 
@@ -239,10 +242,11 @@ async function profileDelete(id) {
   });
 }
 
-async function maybeNotify(results, seenBefore, settings, profile) {
+async function maybeNotify(results, seenBefore, settings, profile, ignored = new Set()) {
   if (settings?.notifyOnNew === false) return;
   const minScore = settings?.notifyMinScore ?? 7;
-  const fresh = results.filter(r => !seenBefore.has(r.list_id) && r.score >= minScore);
+  // Don't notify on ads the user explicitly ignored.
+  const fresh = results.filter(r => !seenBefore.has(r.list_id) && !ignored.has(r.list_id) && r.score >= minScore);
   if (!fresh.length) return;
 
   const top = fresh[0];
