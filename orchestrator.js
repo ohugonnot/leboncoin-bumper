@@ -157,11 +157,12 @@ export async function checkLoginStatus() {
 }
 
 /**
- * Fetch raw ads from /finder/search for each keyword, running the fetch loop
- * inside a real leboncoin tab. Required because DataDome rejects fetches
- * coming from the `chrome-extension://` origin with a 403 + captcha challenge.
+ * Fetch raw ads from /finder/search for each keyword + the user's existing
+ * conversations (so we can flag prospects already contacted). Runs inside a
+ * real leboncoin tab because DataDome rejects fetches from
+ * `chrome-extension://` origins with a 403 + captcha challenge.
  *
- * Returns a map { keyword → ad[] } that processRawAds() then scores/dedups.
+ * @returns {Promise<{adsByKeyword: Object, contactedAdIds: string[]}>}
  */
 export async function fetchAdsViaTab(keywords, maxAgeDays = 30) {
   const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
@@ -178,7 +179,32 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30) {
           const d = new Date(String(iso).replace(' ', 'T'));
           return isNaN(d.getTime()) ? null : (Date.now() - d.getTime()) / 86400000;
         };
-        const out = {};
+
+        // 1) Existing conversations — one global call. The Bearer JWT lives in
+        //    localStorage.luat, the userId is in cookie lbc_user_id. The same
+        //    request from a chrome-extension:// origin returns 401 (no token),
+        //    that's why this whole function runs inside the lbc tab.
+        let contactedAdIds = [];
+        try {
+          const jwt = localStorage.getItem('luat');
+          const userIdCookie = document.cookie.split(';').map(s => s.trim())
+            .find(s => s.startsWith('lbc_user_id='));
+          const userId = userIdCookie ? decodeURIComponent(userIdCookie.split('=')[1]) : null;
+          if (jwt && userId) {
+            const cRes = await fetch(`https://api.leboncoin.fr/messaging/proxy/api/v1/hal/${userId}/conversations?presenceStatus=true`, {
+              headers: { authorization: `Bearer ${jwt}`, accept: 'application/hal+json' },
+              credentials: 'include'
+            });
+            if (cRes.ok) {
+              const cData = await cRes.json();
+              const convs = cData?._embedded?.conversations || [];
+              contactedAdIds = convs.map(c => String(c.itemId || '')).filter(Boolean);
+            }
+          }
+        } catch { /* non-fatal — just won't tag */ }
+
+        // 2) Ad search per keyword
+        const adsByKeyword = {};
         for (const kw of kws) {
           const items = [];
           let offset = 0;
@@ -206,15 +232,45 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30) {
             if (offset >= (data.total ?? 0)) break;
             await new Promise(r => setTimeout(r, 150));
           }
-          out[kw] = items;
+          adsByKeyword[kw] = items;
         }
-        return out;
+        return { adsByKeyword, contactedAdIds };
       }
     });
     return result;
   } finally {
     await chrome.tabs.remove(tab.id).catch(() => {});
   }
+}
+
+/**
+ * Open leboncoin's /reply/{adId} form pre-filled with `message` and bring the
+ * tab to the foreground so the user can review and click "Envoyer".
+ *
+ * We do NOT auto-submit — the user always validates the message themselves.
+ */
+export async function openReplyForm(adId, message) {
+  if (!adId) throw new Error('missing adId');
+  const tab = await chrome.tabs.create({ url: `${LBC}/reply/${adId}`, active: true });
+  // Wait for the form to render, then inject the message.
+  await waitForTabLoad(tab.id);
+  await waitForSelector(tab.id, 'textarea[name="body"], textarea#body', 8000).catch(() => {});
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    args: [message],
+    func: (msg) => {
+      const ta = document.querySelector('textarea[name="body"], textarea#body');
+      if (!ta) return;
+      // React-controlled textarea : use the native setter then dispatch input
+      // event so React picks up the new value.
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(ta, msg);
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      ta.dispatchEvent(new Event('change', { bubbles: true }));
+      ta.focus();
+    }
+  });
+  return tab.id;
 }
 
 async function scrapeEditPage(tabId, adId) {
