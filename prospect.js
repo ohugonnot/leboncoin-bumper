@@ -39,43 +39,52 @@ export const MODERATE_SIGNALS = /\b(informatique|ordinateur|logiciel|programmati
 /** Negative signals — appearance in title OR body drops the ad entirely. */
 export const NEG_SIGNALS = /\b(m[ée]nage|repassage|jardinage|cuisinier|cuisini[èe]re|chef de cuisine|bardeur|couvreur|carrelag|maçonnerie|plomberie|électricien|mécanicien|garde enfant|nounou|baby[- ]sitting|d[ée]m[ée]nagement|chauffeur|saxophon|guitare|piano|chant\b|musicien|colocation|maison\b|appartement|chambre\b|studio\b|tondre|gravât|épave|agricole|ouvrier\b|pelouse|couturi[èe]re|cours d['’]anglais|cours de fran[çc]ais|cours de math|soutien scolaire|aide aux devoirs|primaire|coll[èe]ge\b|aide soignant|infirmier|gardiennage|massage|barman|aide à domicile|écharpe|bijou|figurant|mannequin)\b/i;
 
-/** Titles that start with these words look like genuine demands. */
+/** Titles that start with these words look like genuine demands (legacy, anchored). */
 export const DEMAND_PREFIX = /^(cherche|recherche|besoin|aide |aidez|demande|qui veut|qui peut)/i;
+
+/** Demand hints anywhere in the title (v2 scoring). Broader than DEMAND_PREFIX. */
+export const DEMAND_HINTS = /\b(cherche|recherche|besoin|aide|aider|aidez|demande|quelqu'un|conseil|conseils|d[ée]pannage|r[ée]paration)\b/i;
 
 function escapeRegex(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 /**
- * Score an ad based on title + body content.
+ * Parse the user's keyword list. Each entry can be `term` (weight 1) or
+ * `term:N` (custom weight). Whitespace tolerant. Returns the parsed list.
  *
- * Two modes :
+ * Examples : "wordpress" → {term: "wordpress", weight: 1}
+ *            "recalbox:3" → {term: "recalbox", weight: 3}
+ *            "  raspberry pi : 2  " → {term: "raspberry pi", weight: 2}
+ */
+export function parseProfileKeywords(keywords) {
+  if (!Array.isArray(keywords)) return [];
+  return keywords.map(raw => {
+    const s = String(raw || '').trim();
+    if (s.length < 2) return null;
+    const m = s.match(/^(.+?)\s*:\s*(\d+)\s*$/);
+    if (m) {
+      const term = m[1].trim();
+      const weight = Math.max(1, Math.min(10, parseInt(m[2], 10) || 1));
+      return term.length >= 2 ? { term, weight } : null;
+    }
+    return { term: s, weight: 1 };
+  }).filter(Boolean);
+}
+
+/**
+ * Score v2 — title match worth twice body match, weighted per keyword,
+ * demand hints detected anywhere in the title.
  *
- * 1. **Keyword-match scoring** (new, when `profileKeywords` is an array)
- *    Score = number of distinct profile keywords found in title+body
- *           + 1 if title starts with a demand prefix (Cherche/Recherche…).
- *    Intuitive : "score 3" = 3 of your keywords match. Works for any niche.
- *
- * 2. **Legacy STRONG/MODERATE scoring** (when profileKeywords is omitted)
- *    Kept for tests and any caller not yet aware of the new signature.
- *
- * Both modes still drop ads matching NEG_SIGNALS in title or body.
+ * Legacy mode (no profileKeywords) kept for backward-compatible tests.
  *
  * @param {string} title
  * @param {string} body
- * @param {string[]} [profileKeywords]  if provided, use keyword-match scoring
+ * @param {string[]} [profileKeywords]  enables keyword-match scoring
  */
 export function scoreAd(title, body, profileKeywords) {
   if (!title || title.trim().length < 8) return 0;
   if (NEG_SIGNALS.test(title) || NEG_SIGNALS.test(body || '')) return 0;
   if (Array.isArray(profileKeywords)) {
-    const text = `${title} ${body || ''}`;
-    let count = 0;
-    for (const kw of profileKeywords) {
-      if (!kw || String(kw).length < 2) continue;
-      const re = new RegExp(`\\b${escapeRegex(kw)}\\b`, 'i');
-      if (re.test(text)) count++;
-    }
-    if (DEMAND_PREFIX.test(title)) count++;
-    return count;
+    return explainScore(title, body, profileKeywords).total;
   }
   // Legacy scoring
   let score = 0;
@@ -85,6 +94,33 @@ export function scoreAd(title, body, profileKeywords) {
   if (MODERATE_SIGNALS.test(body || '')) score += 1;
   if (DEMAND_PREFIX.test(title)) score += 2;
   return score;
+}
+
+/**
+ * Return both the total score and a breakdown of where points came from
+ * (for the UI tooltip on each ★ badge).
+ */
+export function explainScore(title, body, profileKeywords) {
+  const parts = [];
+  if (!title || title.trim().length < 8) return { total: 0, parts: ['titre trop court'] };
+  if (NEG_SIGNALS.test(title) || NEG_SIGNALS.test(body || '')) return { total: 0, parts: ['signal négatif détecté'] };
+  const parsed = parseProfileKeywords(profileKeywords || []);
+  let total = 0;
+  for (const { term, weight } of parsed) {
+    const re = new RegExp(`\\b${escapeRegex(term)}\\b`, 'i');
+    if (re.test(title)) {
+      const pts = weight * 2;
+      total += pts; parts.push(`${term} (titre +${pts})`);
+    } else if (re.test(body || '')) {
+      const pts = weight;
+      total += pts; parts.push(`${term} (description +${pts})`);
+    }
+  }
+  if (DEMAND_HINTS.test(title)) {
+    total += 1; parts.push('mot de demande dans le titre +1');
+  }
+  if (!parts.length) parts.push('aucun mot-clé matché');
+  return { total, parts };
 }
 
 /**
@@ -209,15 +245,18 @@ export function processRawAds({
   profileKeywords
 }) {
   const byId = new Map();
+  const usePk = Array.isArray(profileKeywords);
   for (const [kw, ads] of Object.entries(adsByKeyword)) {
     for (const ad of ads || []) {
       const lid = String(ad.list_id || '');
       if (!lid) continue;
       const age = ageDays(ad.first_publication_date);
       if (age === null || age > maxAgeDays) continue;
-      const score = scoreAd(ad.subject || '', ad.body || '', profileKeywords);
+      const explanation = usePk ? explainScore(ad.subject || '', ad.body || '', profileKeywords) : null;
+      const score = usePk ? explanation.total : scoreAd(ad.subject || '', ad.body || '');
       if (score < minScore) continue;
       const entry = buildEntry(ad, { score, kw, isNew: !seenIds.has(lid) });
+      if (explanation) entry.score_breakdown = explanation.parts;
       entry.already_contacted = contactedIds.has(lid);
       const prev = byId.get(lid);
       if (!prev || prev.score < score) byId.set(lid, entry);

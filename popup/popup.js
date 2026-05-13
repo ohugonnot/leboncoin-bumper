@@ -351,7 +351,7 @@ function renderProspects(results, lastRun, seenSet, ignoredSet = new Set()) {
         <a class="card-title" href="${escapeAttr(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.subject)}</a>
         ${isNew ? '<span class="badge new">NOUV.</span>' : ''}
         ${r.already_contacted ? '<span class="badge contacted" title="Tu as déjà une conversation avec cette annonce">✉ DÉJÀ</span>' : ''}
-        <span class="badge score" title="Score de pertinence">★ ${r.score}</span>
+        <span class="badge score" title="${escapeAttr(r.score_breakdown ? r.score_breakdown.join('\n') : 'Score de pertinence')}">★ ${r.score}</span>
       </div>
       <div class="card-meta">
         <span class="loc">${escapeHtml(r.location)}</span>
