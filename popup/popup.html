@@ -206,6 +206,20 @@
           </select>
         </div>
       </div>
+      <div class="row" style="margin-top: 6px;">
+        <div class="field" title="Filtre sur le type de vendeur. Particulier / Pro distingué après le fetch (post-filter côté extension).">
+          <label>Vendeur</label>
+          <select id="p-ownerType">
+            <option value="all">Tous</option>
+            <option value="pro">Pros uniquement</option>
+            <option value="private">Particuliers uniquement</option>
+          </select>
+        </div>
+        <label class="toggle inline" style="align-self: end; margin-bottom: 1px;" title="Ne garde que les annonces qui proposent la livraison (Mondial Relay etc.).">
+          <input type="checkbox" id="p-shippableOnly">
+          <span class="label">📦 Avec livraison seulement</span>
+        </label>
+      </div>
 
       <label class="toggle" style="margin-top: 10px;">
         <input type="checkbox" id="p-notifyOnNew">

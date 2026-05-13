@@ -247,7 +247,9 @@ export function sortEntries(entries) {
 export function processRawAds({
   adsByKeyword, maxAgeDays = 30, minScore = 5,
   seenIds = new Set(), contactedIds = new Set(),
-  profileKeywords
+  profileKeywords,
+  ownerType = 'all',          // 'all' | 'pro' | 'private'
+  shippableOnly = false
 }) {
   const byId = new Map();
   const usePk = Array.isArray(profileKeywords);
@@ -255,6 +257,13 @@ export function processRawAds({
     for (const ad of ads || []) {
       const lid = String(ad.list_id || '');
       if (!lid) continue;
+      // Post-filter : owner type
+      if (ownerType !== 'all' && ad.owner?.type !== ownerType) continue;
+      // Post-filter : shipping available (attribute "shippable" === "true")
+      if (shippableOnly) {
+        const shippable = (ad.attributes || []).some(a => a.key === 'shippable' && a.value === 'true');
+        if (!shippable) continue;
+      }
       const age = ageDays(ad.first_publication_date);
       if (age === null || age > maxAgeDays) continue;
       const explanation = usePk ? explainScore(ad.subject || '', ad.body || '', profileKeywords) : null;

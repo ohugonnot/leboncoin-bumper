@@ -254,6 +254,8 @@ const p = {
   priceMax: document.getElementById('p-priceMax'),
   departments: document.getElementById('p-departments'),
   sortBy: document.getElementById('p-sortBy'),
+  ownerType: document.getElementById('p-ownerType'),
+  shippableOnly: document.getElementById('p-shippableOnly'),
   keywords: document.getElementById('p-keywords'),
   replyTemplate: document.getElementById('p-replyTemplate'),
   // Profile picker
@@ -306,6 +308,8 @@ async function loadProspect() {
   p.priceMax.value = profile.priceMax ?? '';
   p.departments.value = (profile.departments || []).join(', ');
   p.sortBy.value = `${profile.sortBy || 'time'}-${profile.sortOrder || 'desc'}`;
+  p.ownerType.value = profile.ownerType || 'all';
+  p.shippableOnly.checked = !!profile.shippableOnly;
   p.keywords.value = (profile.keywords || []).join('\n');
   p.replyTemplate.value = profile.replyTemplate || DEFAULT_REPLY_TEMPLATE;
 
@@ -469,6 +473,8 @@ async function saveProspect() {
     maxAgeDays: +p.maxAgeDays.value,
     adType: p.adType.value,
     priceMin, priceMax, departments, sortBy, sortOrder,
+    ownerType: p.ownerType.value,
+    shippableOnly: p.shippableOnly.checked,
     replyTemplate: p.replyTemplate.value
   } : pr);
   const prospectGlobalSettings = {
@@ -487,7 +493,7 @@ async function saveProspect() {
   updateFrequencyVisibility();
   await chrome.runtime.sendMessage({ type: 'RESCHEDULE_PROSPECT' });
 }
-[p.enabled, p.frequency, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.adType, p.priceMin, p.priceMax, p.departments, p.sortBy, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate].forEach(el => {
+[p.enabled, p.frequency, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.adType, p.priceMin, p.priceMax, p.departments, p.sortBy, p.ownerType, p.shippableOnly, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate].forEach(el => {
   el.addEventListener('change', saveProspect);
   el.addEventListener('blur', saveProspect);
 });
