@@ -40,23 +40,56 @@
         <h2 class="section-title">Mes annonces</h2>
         <button class="btn ghost small" id="b-refresh-listings" title="Recharger depuis leboncoin">⟳ Charger</button>
       </div>
-      <p class="section-hint" id="b-listings-hint">Charge la liste de tes annonces depuis leboncoin pour les sélectionner.</p>
+
+      <details class="score-help" id="b-help">
+        <summary><strong>Comment marche Republier ?</strong></summary>
+        <ul>
+          <li><strong>Supprime puis recrée à l'identique</strong> chaque annonce cochée : titre, prix, description, photos, catégorie, préférences de contact.</li>
+          <li>L'annonce remonte ainsi en haut des résultats de recherche, comme une nouvelle.</li>
+          <li><strong>Mode test (recommandé au 1er essai)</strong> : scrape uniquement, ne supprime ni ne republie rien.</li>
+          <li><strong>Planning</strong> (optionnel) : automatise le cycle chaque semaine au jour et à l'heure choisis.</li>
+        </ul>
+        <p>⚠️ Les <strong>CGU de Leboncoin interdisent l'automatisation</strong> (art. 8). Utilisation à tes risques. Préfère un compte secondaire pour tester.</p>
+      </details>
+
+      <div class="selection-bar" id="b-selection-bar">
+        <button class="btn-link" id="b-select-all">Tout sélectionner</button>
+        <span class="selection-sep">·</span>
+        <button class="btn-link" id="b-select-none">Aucune</button>
+        <span class="selection-hint" id="b-selection-hint"></span>
+      </div>
       <div class="listings" id="b-listings"></div>
     </div>
 
     <!-- 2. ACTION PRINCIPALE -->
     <div class="action-bar">
-      <button class="btn primary big" id="b-runNow">↻ Republier maintenant</button>
+      <button class="btn primary big" id="b-runNow">↻ Tester (rien ne sera touché)</button>
       <label class="toggle inline" title="Si coché, l'extension simule mais ne supprime ni ne reposte rien.">
         <input type="checkbox" id="b-dryRun" checked>
         <span class="label">Mode test</span>
       </label>
     </div>
-    <p class="section-hint center" id="b-action-hint">En mode test, rien n'est supprimé. Décoche pour passer en mode réel.</p>
+    <p class="section-hint center" id="b-action-hint">✓ <strong>Mode test actif</strong> : on simule, rien n'est supprimé ni reposté.</p>
+
+    <div class="scan-progress" id="b-bump-progress" hidden></div>
+
+    <!-- 3. STATS (dernier / prochain) -->
+    <div class="bump-meta" id="b-bump-meta">
+      <span class="bump-meta-last" id="b-meta-last">🕒 Jamais lancé</span>
+      <span class="bump-meta-next" id="b-meta-next">⏰ Aucun planning</span>
+    </div>
 
     <hr>
 
-    <!-- 3. PLANNING (réglages secondaires) -->
+    <!-- 4. HISTORIQUE -->
+    <details class="bump-history section" id="b-history-section">
+      <summary><h2 class="section-title">📋 Historique des cycles</h2></summary>
+      <div id="b-history-list"></div>
+    </details>
+
+    <hr>
+
+    <!-- 5. PLANNING (réglages secondaires) -->
     <details class="section" id="b-planning-section">
       <summary><h2 class="section-title">📅 Planifier (optionnel)</h2></summary>
       <label class="toggle">
@@ -85,9 +118,10 @@
 
     <hr>
 
-    <!-- 4. LOG (replié par défaut, devs only) -->
+    <!-- 6. LOG (replié par défaut, pour debug) -->
     <details class="section" id="b-log-section">
       <summary><h2 class="section-title">🪵 Journal technique</h2></summary>
+      <p class="section-hint" style="margin-top:4px">Détail bas niveau des opérations — utile pour déboguer.</p>
       <div class="log" id="b-log"></div>
       <div style="text-align: right; margin-top: 6px;">
         <button class="btn ghost small" id="b-clearLog">Effacer</button>
