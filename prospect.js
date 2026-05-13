@@ -1,16 +1,9 @@
-// SPDX-License-Identifier: MIT
-//
-// Prospect Watch — passive weekly scan of leboncoin demands matching a
-// configurable tech profile. Calls leboncoin's public /finder/search API
-// (one POST per keyword), scores ad titles + bodies, and deduplicates
-// against previously-seen ad IDs to surface only what is new.
-//
-// All exports are pure functions wherever possible (no chrome.* access)
-// so they can be exercised by Node's built-in test runner.
-
+// Scoring + filtering for /finder/search results. Prod runs the network phase
+// inside a leboncoin tab (see orchestrator.fetchAdsViaTab) — the helpers here
+// stay pure so Node tests can exercise them, with one tab-side duplicate of
+// searchKeyword that must be kept in sync.
 const API_URL = 'https://api.leboncoin.fr/finder/search';
-// Leboncoin's public web-client API key — visible in every browser request.
-// It is not a secret; embedding it here keeps the extension self-contained.
+// Public web-client API key, visible in every browser request to LBC.
 const API_KEY = 'ba0c2dad52b3ec';
 
 /** Default keyword set, tuned for a French full-stack/backend developer profile.

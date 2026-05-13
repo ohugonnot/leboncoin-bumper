@@ -1,6 +1,5 @@
-// MV3 popup auto-closes on blur. Any in-flight sendMessage / chrome.storage
-// call rejects right as the document unloads. The SW handler has already
-// persisted its result, so the popup didn't actually need the response.
+// Popup unloads on blur ; in-flight chrome.* rejections from peer-gone are
+// already accounted for SW-side (storage written). Mute only those.
 const POPUP_GONE_RE = /message channel closed|Frame with ID|Extension context invalidated|Receiving end does not exist|back\/forward cache/i;
 window.addEventListener('unhandledrejection', (e) => {
   const text = String(e.reason?.message ?? e.reason ?? '');

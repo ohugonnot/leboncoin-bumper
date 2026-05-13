@@ -14,7 +14,7 @@ Merci d'envisager une contribution.
 ```bash
 git clone https://github.com/ohugonnot/leboncoin-bumper.git
 cd leboncoin-bumper
-npm test     # 18 tests, 0 dépendance
+npm test     # 189 tests, 0 dépendance
 ```
 
 Charge l'extension non empaquetée depuis `chrome://extensions` (Mode développeur → Charger l'extension non empaquetée).
