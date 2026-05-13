@@ -8,7 +8,7 @@
   <img src="docs/screenshots/prospect-hero.png" width="480" alt="Booster Leboncoin — onglet Prospects : demandes tech récentes scorées et dédupliquées">
 </p>
 
-[![Tests](https://img.shields.io/badge/tests-23%20passing-success)](#tests)
+[![Tests](https://img.shields.io/badge/tests-35%20passing-success)](#tests)
 [![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 [![Manifest](https://img.shields.io/badge/Chrome-MV3-orange)](manifest.json)
 
@@ -136,7 +136,7 @@ npm test
 node --test tests/
 ```
 
-18 tests, ~120 ms. Couvre les régressions regex (ex : "vue" tout court ne doit pas matcher le framework JS), le comportement `seenIds`, le filtre d'âge, et le dédoublonnage à travers les mots-clés.
+35 tests, ~120 ms. Couvre : régressions regex (ex : "vue" tout court ne doit pas matcher le framework JS), le scoring v2 (titre x2, poids `:N`, demande contient, breakdown), le comportement `seenIds`, le filtre d'âge, le dédoublonnage à travers les mots-clés, l'édition du template, et les chars spéciaux dans les keywords (`C++`, `.NET`).
 
 ## ⚠️ Limitations & avertissement
 

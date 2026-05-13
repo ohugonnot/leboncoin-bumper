@@ -25,13 +25,13 @@
     <a class="btn primary small" href="https://www.leboncoin.fr/" target="_blank" rel="noopener">Se connecter</a>
   </div>
 
-  <nav class="tabs">
-    <button class="tab active" data-tab="bumper">↻ Republier</button>
-    <button class="tab" data-tab="prospect">🎯 Prospects</button>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="bumper" role="tab" aria-selected="true" aria-controls="panel-bumper">↻ Republier</button>
+    <button class="tab" data-tab="prospect" role="tab" aria-selected="false" aria-controls="panel-prospect">🎯 Prospects</button>
   </nav>
 
   <!-- BUMPER PANEL ────────────────────────────────────────────── -->
-  <section class="panel active" data-panel="bumper">
+  <section class="panel active" data-panel="bumper" role="tabpanel" id="panel-bumper">
 
     <!-- 1. ANNONCES (la chose principale qu'on regarde) -->
     <div class="section">
@@ -95,7 +95,7 @@
   </section>
 
   <!-- PROSPECT PANEL ──────────────────────────────────────────── -->
-  <section class="panel" data-panel="prospect">
+  <section class="panel" data-panel="prospect" role="tabpanel" id="panel-prospect">
     <!-- Profile picker — multi-veille -->
     <div class="profile-bar">
       <select id="p-profile-select" title="Veille active"></select>

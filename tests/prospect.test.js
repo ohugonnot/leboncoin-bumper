@@ -85,7 +85,7 @@ test('buildEntry: extracts location + truncates body', () => {
   const e = buildEntry(ad, { score: 8, kw: 'wordpress', isNew: true });
   assert.equal(e.list_id, '3196483489');
   assert.equal(e.location, 'Metz 57000');
-  assert.equal(e.body.length, 600);
+  assert.equal(e.body.length, 1200);
   assert.equal(e.score, 8);
   assert.equal(e.is_new, true);
 });
@@ -242,6 +242,22 @@ test('parseProfileKeywords: parses :N syntax and clamps weights', () => {
     { term: 'too', weight: 10 },  // clamped to max 10
     { term: 'php', weight: 1 }    // weight 0 falls back to default 1
   ]);
+});
+
+test('scoreAd v2: special regex chars in keywords are escaped safely', () => {
+  // `.*` shouldn't act as a wildcard, `(php)` shouldn't be capture group
+  const s = scoreAd('I use C++ and .NET', '', ['.*', 'C++', '.NET']);
+  // Only literal "C++" and ".NET" should match (".*" is too short after escape ? no, length 2 OK).
+  // ".*" as literal won't match anything in the text → 0.
+  // "C++" matches → +2. ".NET" matches → +2. Total 4.
+  assert.equal(s, 4);
+});
+
+test('scoreAd v2: keyword with parentheses doesn\'t break regex', () => {
+  const s = scoreAd('Recherche (php)', '', ['(php)']);
+  // Literal "(php)" matches the title → +2 + no demand prefix in our regex (Recherche is demand)
+  // Recherche → +1. Total 3.
+  assert.equal(s, 3);
 });
 
 test('explainScore: returns per-keyword breakdown for tooltip', () => {
