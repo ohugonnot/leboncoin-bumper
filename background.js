@@ -94,22 +94,50 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     responded = true;
     try { sendResponse(data); } catch { /* channel closed */ }
   };
+  // Fast fire-and-forget ops : respond synchronously, do the work after. The
+  // popup never awaits anything useful from these, and an early respond
+  // prevents the "channel closed before response" warning when the popup
+  // closes mid-flight (auto-dismiss on blur, tab switch).
+  if (msg.type === 'RESCHEDULE') {
+    respond({ ok: true });
+    rescheduleBump();
+    return false;
+  }
+  if (msg.type === 'RESCHEDULE_PROSPECT') {
+    respond({ ok: true });
+    rescheduleProspect();
+    return false;
+  }
+  if (msg.type === 'PROFILE_SET_ACTIVE') {
+    respond({ ok: true });
+    chrome.storage.local.set({ activeProfileId: msg.id });
+    return false;
+  }
+  if (msg.type === 'INBOX_DISMISS') {
+    respond({ ok: true });
+    (async () => {
+      const { inboxDismissed = [] } = await chrome.storage.local.get('inboxDismissed');
+      const next = new Set(inboxDismissed);
+      next.add(msg.convId);
+      await chrome.storage.local.set({ inboxDismissed: [...next].slice(-2000) });
+    })();
+    return false;
+  }
+  if (msg.type === 'MARK_PROSPECTS_SEEN') {
+    respond({ ok: true });
+    (async () => {
+      const { activeProfileId } = await chrome.storage.local.get('activeProfileId');
+      await markResultsSeen(msg.results || [], activeProfileId);
+    })();
+    return false;
+  }
+  // Slow ops : popup awaits a real result, keep the channel open.
   (async () => {
     try {
       if (msg.type === 'RUN_NOW') {
         respond({ ok: true, result: await runCycle({ trigger: 'manual' }) });
-      } else if (msg.type === 'RESCHEDULE') {
-        await rescheduleBump();
-        respond({ ok: true });
       } else if (msg.type === 'RUN_PROSPECT_NOW') {
         respond({ ok: true, result: await doProspectScan('manual') });
-      } else if (msg.type === 'RESCHEDULE_PROSPECT') {
-        await rescheduleProspect();
-        respond({ ok: true });
-      } else if (msg.type === 'MARK_PROSPECTS_SEEN') {
-        const { activeProfileId } = await chrome.storage.local.get('activeProfileId');
-        await markResultsSeen(msg.results || [], activeProfileId);
-        respond({ ok: true });
       } else if (msg.type === 'CHECK_LOGIN') {
         respond({ ok: true, result: await checkLoginStatus() });
       } else if (msg.type === 'REFRESH_LISTINGS') {
@@ -127,9 +155,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       } else if (msg.type === 'PROFILE_DELETE') {
         await profileDelete(msg.id);
         respond({ ok: true });
-      } else if (msg.type === 'PROFILE_SET_ACTIVE') {
-        await chrome.storage.local.set({ activeProfileId: msg.id });
-        respond({ ok: true });
       } else if (msg.type === 'INBOX_REFRESH') {
         try {
           const { conversations, at } = await fetchInboxViaTab();
@@ -145,12 +170,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           });
           respond({ ok: false, error: e.message });
         }
-      } else if (msg.type === 'INBOX_DISMISS') {
-        const { inboxDismissed = [] } = await chrome.storage.local.get('inboxDismissed');
-        const next = new Set(inboxDismissed);
-        next.add(msg.convId);
-        await chrome.storage.local.set({ inboxDismissed: [...next].slice(-2000) });
-        respond({ ok: true });
       } else {
         respond({ ok: false, error: `unknown message type: ${msg.type}` });
       }
