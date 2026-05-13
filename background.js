@@ -56,6 +56,7 @@ async function migrateToProfiles() {
     activeProfileId: 'default',
     prospectGlobalSettings: {
       enabled: old.enabled ?? false,
+      frequency: 'week',
       dayOfWeek: old.dayOfWeek ?? 1,
       hour: old.hour ?? 10,
       minute: old.minute ?? 0,
@@ -157,7 +158,8 @@ async function doProspectScan(trigger) {
   const allContacted = new Set([...contactedAdIds, ...prospectContactedLocal]);
   const out = processRawAds({
     adsByKeyword, maxAgeDays, minScore,
-    seenIds: seen, contactedIds: allContacted
+    seenIds: seen, contactedIds: allContacted,
+    profileKeywords: keywords
   });
   await chrome.storage.local.set({
     prospectResultsByProfile: { ...prospectResultsByProfile, [profile.id]: out.results },
@@ -175,10 +177,13 @@ async function doProspectScan(trigger) {
 async function profileCreate(name) {
   const { prospectProfiles = [] } = await chrome.storage.local.get('prospectProfiles');
   const id = `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  // New profiles start empty : the user defines their own keywords for their own
+  // niche. Score min 0 = pas de filtre score (chaque niche a son propre vocabulaire,
+  // notre regex de scoring est calibré pour le profil dev — pas universel).
   const profile = {
     id, name: (name || 'Nouvelle veille').slice(0, 60),
-    keywords: DEFAULT_KEYWORDS,
-    minScore: 5, maxAgeDays: 30, replyTemplate: ''
+    keywords: [],
+    minScore: 1, maxAgeDays: 30, replyTemplate: ''
   };
   await chrome.storage.local.set({
     prospectProfiles: [...prospectProfiles, profile],
@@ -271,14 +276,36 @@ async function rescheduleBump() {
 }
 
 async function rescheduleProspect() {
-  const { prospectSettings } = await chrome.storage.local.get('prospectSettings');
+  const { prospectGlobalSettings: s = {} } = await chrome.storage.local.get('prospectGlobalSettings');
   await chrome.alarms.clear(PROSPECT_ALARM);
-  if (!prospectSettings?.enabled) return;
-  const jitter = jitterMs(prospectSettings.jitterMinutes ?? 30);
-  chrome.alarms.create(PROSPECT_ALARM, {
-    when: nextOccurrence(prospectSettings.dayOfWeek, prospectSettings.hour, prospectSettings.minute) + jitter,
-    periodInMinutes: 7 * 24 * 60
-  });
+  if (!s.enabled) return;
+  const jitter = jitterMs(s.jitterMinutes ?? 30);
+  const frequency = s.frequency || 'week';
+  // Compute the next firing slot.
+  let whenMs;
+  let periodInMinutes;
+  if (frequency === 'hour') {
+    // Every hour, ~5 min past the start of the next hour
+    const next = new Date();
+    next.setHours(next.getHours() + 1, 5, 0, 0);
+    whenMs = next.getTime();
+    periodInMinutes = 60;
+  } else if (frequency === 'day') {
+    whenMs = nextOccurrenceDaily(s.hour ?? 10, s.minute ?? 0);
+    periodInMinutes = 24 * 60;
+  } else {
+    whenMs = nextOccurrence(s.dayOfWeek ?? 1, s.hour ?? 10, s.minute ?? 0);
+    periodInMinutes = 7 * 24 * 60;
+  }
+  chrome.alarms.create(PROSPECT_ALARM, { when: whenMs + jitter, periodInMinutes });
+}
+
+function nextOccurrenceDaily(hour, minute) {
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(hour, minute, 0, 0);
+  if (target.getTime() <= now.getTime()) target.setDate(target.getDate() + 1);
+  return target.getTime();
 }
 
 function jitterMs(maxMinutes) {

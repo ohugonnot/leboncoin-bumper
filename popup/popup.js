@@ -241,6 +241,7 @@ import { DEFAULT_REPLY_TEMPLATE, formatReplyTemplate } from '../prospect.js';
 const p = {
   // Global settings (apply to all profiles)
   enabled: document.getElementById('p-enabled'),
+  frequency: document.getElementById('p-frequency'),
   dayOfWeek: document.getElementById('p-dayOfWeek'),
   hour: document.getElementById('p-hour'),
   notifyOnNew: document.getElementById('p-notifyOnNew'),
@@ -285,10 +286,12 @@ async function loadProspect() {
 
   // Global settings
   p.enabled.checked = !!global.enabled;
+  p.frequency.value = global.frequency || 'week';
   p.dayOfWeek.value = global.dayOfWeek ?? 1;
   p.hour.value = global.hour ?? 10;
   p.notifyOnNew.checked = global.notifyOnNew !== false;
   p.notifyMinScore.value = global.notifyMinScore ?? 7;
+  updateFrequencyVisibility();
 
   // Per-profile settings
   p.minScore.value = profile.minScore ?? 5;
@@ -313,9 +316,22 @@ function renderProspects(results, lastRun, seenSet, ignoredSet = new Set()) {
   const newCount = visible.filter(r => !seenSet.has(r.list_id)).length;
   p.statNew.textContent = newCount;
   p.statTotal.textContent = visible.length;
-  // Hide the first-scan hint once we have results
+  // Hint visibility : show different messages depending on state
   const hint = document.getElementById('p-empty-hint');
-  if (hint) hint.hidden = results.length > 0;
+  if (hint) {
+    if (results.length > 0) {
+      hint.hidden = true;
+    } else if (lastRun?.ts) {
+      // We scanned but got 0 results — give actionable advice
+      hint.hidden = false;
+      hint.innerHTML = `<strong>0 prospect trouvé sur ${lastRun.scanned} mot-clé${lastRun.scanned > 1 ? 's' : ''}.</strong><br>`
+        + `Probable : les mots-clés sont ultra-niches (peu de "demandes" sur leboncoin), trop spécifiques, ou tes annonces sont trop vieilles. `
+        + `Élargis les mots-clés, augmente <em>Âge max</em>, ou baisse <em>Score min</em>.`;
+    } else {
+      hint.hidden = false;
+      hint.innerHTML = `Le scan interroge l'API leboncoin sur tes mots-clés (par défaut&nbsp;: profils dev/web/IA/automatisation). Premier scan : ~30 à 60 secondes.`;
+    }
+  }
   if (lastRun?.ts) {
     const d = new Date(lastRun.ts);
     p.lastRun.textContent = `Dernier scan : ${d.toLocaleDateString('fr-FR')} ${d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})} · ${lastRun.scanned || 0} mots-clés`;
@@ -419,6 +435,14 @@ function showToast(msg) {
   toastTimer = setTimeout(() => toast.classList.remove('visible'), 2200);
 }
 
+function updateFrequencyVisibility() {
+  const freq = p.frequency.value;
+  document.querySelectorAll('[data-show-when]').forEach(el => {
+    const allowed = el.dataset.showWhen.split(',');
+    el.hidden = !allowed.includes(freq);
+  });
+}
+
 async function saveProspect() {
   const { prospectProfiles = [], activeProfileId } = await chrome.storage.local.get(['prospectProfiles', 'activeProfileId']);
   const nextProfiles = prospectProfiles.map(pr => pr.id === activeProfileId ? {
@@ -430,6 +454,7 @@ async function saveProspect() {
   } : pr);
   const prospectGlobalSettings = {
     enabled: p.enabled.checked,
+    frequency: p.frequency.value,
     dayOfWeek: +p.dayOfWeek.value,
     hour: +p.hour.value,
     minute: 0,
@@ -440,9 +465,10 @@ async function saveProspect() {
     prospectProfiles: nextProfiles,
     prospectGlobalSettings
   });
+  updateFrequencyVisibility();
   await chrome.runtime.sendMessage({ type: 'RESCHEDULE_PROSPECT' });
 }
-[p.enabled, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate].forEach(el => {
+[p.enabled, p.frequency, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate].forEach(el => {
   el.addEventListener('change', saveProspect);
   el.addEventListener('blur', saveProspect);
 });

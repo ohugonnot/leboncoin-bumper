@@ -131,10 +131,23 @@
 
       <label class="toggle">
         <input type="checkbox" id="p-enabled">
-        <span class="label">Scan automatique chaque semaine</span>
+        <span class="label">Scan automatique</span>
+        <span class="hint">tourne tant que le navigateur est lancé</span>
       </label>
       <div class="row" style="margin-top: 6px;">
         <div class="field">
+          <label>Fréquence</label>
+          <select id="p-frequency">
+            <option value="hour">Chaque heure</option>
+            <option value="day">Chaque jour</option>
+            <option value="week" selected>Chaque semaine</option>
+          </select>
+        </div>
+        <div class="field" data-show-when="day,week">
+          <label>Heure</label>
+          <input type="number" id="p-hour" min="0" max="23">
+        </div>
+        <div class="field" data-show-when="week">
           <label>Jour</label>
           <select id="p-dayOfWeek">
             <option value="0">Dim</option><option value="1">Lun</option>
@@ -143,23 +156,25 @@
             <option value="6">Sam</option>
           </select>
         </div>
-        <div class="field"><label>Heure</label><input type="number" id="p-hour" min="0" max="23"></div>
-        <div class="field" title="Plus haut = moins de résultats mais plus pertinents (défaut 5)"><label>Score min</label><input type="number" id="p-minScore" min="1" max="20"></div>
+      </div>
+      <div class="row" style="margin-top: 6px;">
+        <div class="field" title="Score = nombre de tes keywords matés dans l'annonce, +1 si commence par Cherche/Recherche."><label>Score min</label><input type="number" id="p-minScore" min="0" max="20"></div>
         <div class="field"><label>Âge max (j)</label><input type="number" id="p-maxAgeDays" min="1" max="90"></div>
       </div>
 
       <label class="toggle" style="margin-top: 10px;">
         <input type="checkbox" id="p-notifyOnNew">
         <span class="label">🔔 Notifications desktop</span>
-        <span class="hint">à chaque nouveau prospect</span>
+        <span class="hint">seulement les plus pertinentes</span>
       </label>
       <div class="row">
-        <div class="field" title="Seuil de score pour déclencher une notif (par défaut 7)"><label>Score notif</label><input type="number" id="p-notifyMinScore" min="1" max="20"></div>
+        <div class="field" title="Seuil de score pour déclencher une notif. 1 = toute nouvelle annonce. 3+ = seulement celles qui mat plusieurs de tes keywords."><label>Notif si score ≥</label><input type="number" id="p-notifyMinScore" min="1" max="20"></div>
       </div>
 
       <div class="field" style="margin-top: 10px;">
-        <label>Mots-clés <span class="muted">(un par ligne)</span></label>
-        <textarea id="p-keywords" rows="6" style="resize: vertical; min-height: 90px;"></textarea>
+        <label>Mots-clés <span class="muted">(un par ligne, propre à cette veille)</span></label>
+        <textarea id="p-keywords" rows="6" style="resize: vertical; min-height: 90px;" placeholder="wordpress&#10;prestashop&#10;…"></textarea>
+        <p class="section-hint">Le scan interroge l'API leboncoin pour chaque mot-clé (recherche "demande" uniquement).</p>
       </div>
 
       <div class="field" style="margin-top: 10px;">

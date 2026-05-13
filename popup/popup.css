@@ -206,11 +206,8 @@ header .meta { font-size: 11px; color: var(--ink-soft); }
 .prospect-list::-webkit-scrollbar { width: 8px; }
 .prospect-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 .prospect-list::-webkit-scrollbar-thumb:hover { background: var(--ink-soft); }
-.prospect-list:empty::before {
-  content: "Aucun prospect. Lance un scan ↑";
-  display: block; text-align: center; padding: 28px;
-  color: var(--ink-soft); font-style: italic;
-}
+/* Empty-list message handled by the hint paragraph (p-empty-hint),
+   no double-message needed here. */
 
 .card {
   background: var(--bg); border: 1px solid var(--border);
