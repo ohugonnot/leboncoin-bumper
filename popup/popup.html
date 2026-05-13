@@ -96,6 +96,14 @@
 
   <!-- PROSPECT PANEL ──────────────────────────────────────────── -->
   <section class="panel" data-panel="prospect">
+    <!-- Profile picker — multi-veille -->
+    <div class="profile-bar">
+      <select id="p-profile-select" title="Veille active"></select>
+      <button class="icon-btn small" id="p-profile-add" title="Nouvelle veille">＋</button>
+      <button class="icon-btn small" id="p-profile-rename" title="Renommer">✎</button>
+      <button class="icon-btn small" id="p-profile-delete" title="Supprimer cette veille">🗑</button>
+    </div>
+
     <div class="prospect-meta">
       <div class="stat"><span class="n" id="p-stat-new">–</span><span class="l">Nouveaux</span></div>
       <div class="stat"><span class="n" id="p-stat-total">–</span><span class="l">Total &lt;30j</span></div>
@@ -117,7 +125,9 @@
     <hr>
 
     <details class="section">
-      <summary><h2 class="section-title">⚙️ Réglages veille</h2></summary>
+      <summary><h2 class="section-title">⚙️ Réglages de cette veille</h2></summary>
+
+      <p class="section-hint">Les keywords / template sont propres à la veille active. Le planning et les notifications sont globaux.</p>
 
       <label class="toggle">
         <input type="checkbox" id="p-enabled">

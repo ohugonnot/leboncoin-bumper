@@ -222,15 +222,20 @@ export async function runProspectScan({
 }
 
 /**
- * Persist the IDs the user has acknowledged.
+ * Persist the IDs the user has acknowledged for a given profile.
  * Only safe to call from extension contexts (popup / service worker).
  */
-export async function markResultsSeen(results) {
-  const { prospectSeenIds = [] } = await chrome.storage.local.get('prospectSeenIds');
-  const next = new Set(prospectSeenIds);
+export async function markResultsSeen(results, profileId) {
+  const { prospectSeenIdsByProfile = {} } = await chrome.storage.local.get('prospectSeenIdsByProfile');
+  const next = new Set(prospectSeenIdsByProfile[profileId] || []);
   for (const r of results) next.add(r.list_id);
   // Keep history bounded to avoid runaway growth.
-  await chrome.storage.local.set({ prospectSeenIds: [...next].slice(-5000) });
+  await chrome.storage.local.set({
+    prospectSeenIdsByProfile: {
+      ...prospectSeenIdsByProfile,
+      [profileId]: [...next].slice(-5000)
+    }
+  });
 }
 
 export const DEFAULT_REPLY_TEMPLATE = (
