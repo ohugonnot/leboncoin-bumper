@@ -703,7 +703,7 @@ function renderInbox(cache, dismissed) {
       </div>
     `;
     card.querySelector('.open-conv-btn').addEventListener('click', () => {
-      chrome.tabs.create({ url: `https://www.leboncoin.fr/messagerie/${conv.conversationId}` });
+      chrome.tabs.create({ url: `https://www.leboncoin.fr/messages/id/${conv.conversationId}` });
     });
     card.querySelector('.dismiss-btn').addEventListener('click', async () => {
       await chrome.runtime.sendMessage({ type: 'INBOX_DISMISS', convId: conv.conversationId });

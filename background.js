@@ -84,71 +84,78 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  // MV3 popups close mid-await (user clicks away or popup auto-dismisses on
+  // blur). sendResponse on a dead channel throws an "unchecked runtime error";
+  // we swallow it because work has already written to chrome.storage and the
+  // popup re-reads on reopen.
+  let responded = false;
+  const respond = (data) => {
+    if (responded) return;
+    responded = true;
+    try { sendResponse(data); } catch { /* channel closed */ }
+  };
   (async () => {
-    if (msg.type === 'RUN_NOW') {
-      sendResponse({ ok: true, result: await runCycle({ trigger: 'manual' }) });
-    } else if (msg.type === 'RESCHEDULE') {
-      await rescheduleBump();
-      sendResponse({ ok: true });
-    } else if (msg.type === 'RUN_PROSPECT_NOW') {
-      sendResponse({ ok: true, result: await doProspectScan('manual') });
-    } else if (msg.type === 'RESCHEDULE_PROSPECT') {
-      await rescheduleProspect();
-      sendResponse({ ok: true });
-    } else if (msg.type === 'MARK_PROSPECTS_SEEN') {
-      const { activeProfileId } = await chrome.storage.local.get('activeProfileId');
-      await markResultsSeen(msg.results || [], activeProfileId);
-      sendResponse({ ok: true });
-    } else if (msg.type === 'CHECK_LOGIN') {
-      sendResponse({ ok: true, result: await checkLoginStatus() });
-    } else if (msg.type === 'REFRESH_LISTINGS') {
-      try {
+    try {
+      if (msg.type === 'RUN_NOW') {
+        respond({ ok: true, result: await runCycle({ trigger: 'manual' }) });
+      } else if (msg.type === 'RESCHEDULE') {
+        await rescheduleBump();
+        respond({ ok: true });
+      } else if (msg.type === 'RUN_PROSPECT_NOW') {
+        respond({ ok: true, result: await doProspectScan('manual') });
+      } else if (msg.type === 'RESCHEDULE_PROSPECT') {
+        await rescheduleProspect();
+        respond({ ok: true });
+      } else if (msg.type === 'MARK_PROSPECTS_SEEN') {
+        const { activeProfileId } = await chrome.storage.local.get('activeProfileId');
+        await markResultsSeen(msg.results || [], activeProfileId);
+        respond({ ok: true });
+      } else if (msg.type === 'CHECK_LOGIN') {
+        respond({ ok: true, result: await checkLoginStatus() });
+      } else if (msg.type === 'REFRESH_LISTINGS') {
         const out = await listUserAds();
         await chrome.storage.local.set({ myListings: out });
-        sendResponse({ ok: true, result: out });
-      } catch (e) {
-        sendResponse({ ok: false, error: e.message });
-      }
-    } else if (msg.type === 'OPEN_REPLY_FORM') {
-      try {
+        respond({ ok: true, result: out });
+      } else if (msg.type === 'OPEN_REPLY_FORM') {
         await openReplyForm(msg.listId, msg.message);
-        sendResponse({ ok: true });
-      } catch (e) {
-        sendResponse({ ok: false, error: e.message });
+        respond({ ok: true });
+      } else if (msg.type === 'PROFILE_CREATE') {
+        respond({ ok: true, result: await profileCreate(msg.name) });
+      } else if (msg.type === 'PROFILE_RENAME') {
+        await profileRename(msg.id, msg.name);
+        respond({ ok: true });
+      } else if (msg.type === 'PROFILE_DELETE') {
+        await profileDelete(msg.id);
+        respond({ ok: true });
+      } else if (msg.type === 'PROFILE_SET_ACTIVE') {
+        await chrome.storage.local.set({ activeProfileId: msg.id });
+        respond({ ok: true });
+      } else if (msg.type === 'INBOX_REFRESH') {
+        try {
+          const { conversations, at } = await fetchInboxViaTab();
+          const classified = classifyConversations(conversations);
+          await chrome.storage.local.set({
+            inboxCache: classified,
+            inboxLastRun: { at, error: null }
+          });
+          respond({ ok: true, result: classified });
+        } catch (e) {
+          await chrome.storage.local.set({
+            inboxLastRun: { at: Date.now(), error: String(e?.message || e) }
+          });
+          respond({ ok: false, error: e.message });
+        }
+      } else if (msg.type === 'INBOX_DISMISS') {
+        const { inboxDismissed = [] } = await chrome.storage.local.get('inboxDismissed');
+        const next = new Set(inboxDismissed);
+        next.add(msg.convId);
+        await chrome.storage.local.set({ inboxDismissed: [...next].slice(-2000) });
+        respond({ ok: true });
+      } else {
+        respond({ ok: false, error: `unknown message type: ${msg.type}` });
       }
-    } else if (msg.type === 'PROFILE_CREATE') {
-      const out = await profileCreate(msg.name);
-      sendResponse({ ok: true, result: out });
-    } else if (msg.type === 'PROFILE_RENAME') {
-      await profileRename(msg.id, msg.name);
-      sendResponse({ ok: true });
-    } else if (msg.type === 'PROFILE_DELETE') {
-      await profileDelete(msg.id);
-      sendResponse({ ok: true });
-    } else if (msg.type === 'PROFILE_SET_ACTIVE') {
-      await chrome.storage.local.set({ activeProfileId: msg.id });
-      sendResponse({ ok: true });
-    } else if (msg.type === 'INBOX_REFRESH') {
-      try {
-        const { conversations, at } = await fetchInboxViaTab();
-        const classified = classifyConversations(conversations);
-        await chrome.storage.local.set({
-          inboxCache: classified,
-          inboxLastRun: { at, error: null }
-        });
-        sendResponse({ ok: true, result: classified });
-      } catch (e) {
-        await chrome.storage.local.set({
-          inboxLastRun: { at: Date.now(), error: String(e?.message || e) }
-        });
-        sendResponse({ ok: false, error: e.message });
-      }
-    } else if (msg.type === 'INBOX_DISMISS') {
-      const { inboxDismissed = [] } = await chrome.storage.local.get('inboxDismissed');
-      const next = new Set(inboxDismissed);
-      next.add(msg.convId);
-      await chrome.storage.local.set({ inboxDismissed: [...next].slice(-2000) });
-      sendResponse({ ok: true });
+    } catch (e) {
+      respond({ ok: false, error: String(e?.message || e) });
     }
   })();
   return true;
