@@ -15,7 +15,7 @@ self.addEventListener('unhandledrejection', (e) => {
   if (POPUP_GONE_RE.test(text)) e.preventDefault();
 });
 
-import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm, fetchInboxViaTab } from './orchestrator.js';
+import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm, fetchInboxViaTab, fetchMyAdsViaApi } from './orchestrator.js';
 import { processRawAds, markResultsSeen, DEFAULT_KEYWORDS } from './prospect.js';
 import { classifyConversations } from './messaging.js';
 
@@ -170,7 +170,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       } else if (msg.type === 'CHECK_LOGIN') {
         respond({ ok: true, result: await checkLoginStatus() });
       } else if (msg.type === 'REFRESH_LISTINGS') {
-        const out = await listUserAds();
+        let out;
+        try {
+          out = await fetchMyAdsViaApi();
+        } catch (apiErr) {
+          // API failed (401, network error, DataDome…) — fall back to DOM scrape.
+          console.warn('[lbc-bumper] dashboard API failed, falling back to DOM scrape:', apiErr.message);
+          out = await listUserAds();
+        }
         await chrome.storage.local.set({ myListings: out });
         respond({ ok: true, result: out });
       } else if (msg.type === 'GET_BUMP_STATUS') {
@@ -287,8 +294,6 @@ async function doProspectScan(trigger) {
   await maybeNotify(out.results, seen, prospectGlobalSettings, profile, ignored);
   return out;
 }
-
-// ── Profile CRUD ───────────────────────────────────────────────────────────
 
 async function profileCreate(name) {
   const { prospectProfiles = [] } = await chrome.storage.local.get('prospectProfiles');
@@ -410,7 +415,6 @@ async function rescheduleProspect() {
   if (!s.enabled) return;
   const jitter = jitterMs(s.jitterMinutes ?? 30);
   const frequency = s.frequency || 'week';
-  // Compute the next firing slot.
   let whenMs;
   let periodInMinutes;
   if (frequency === 'hour') {

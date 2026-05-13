@@ -64,12 +64,26 @@
     <!-- 2. ACTION PRINCIPALE -->
     <div class="action-bar">
       <button class="btn primary big" id="b-runNow">↻ Tester (rien ne sera touché)</button>
+      <button class="btn secondary" id="b-smartBump" title="Planifie le bump au prochain créneau de forte affluence pour la catégorie de tes annonces.">🤖 Planifier au pic</button>
       <label class="toggle inline" title="Si coché, l'extension simule mais ne supprime ni ne reposte rien.">
         <input type="checkbox" id="b-dryRun" checked>
         <span class="label">Mode test</span>
       </label>
     </div>
     <p class="section-hint center" id="b-action-hint">✓ <strong>Mode test actif</strong> : on simule, rien n'est supprimé ni reposté.</p>
+    <p class="section-hint center" id="b-smart-bump-confirm" hidden></p>
+
+    <!-- 2b. BACKUP / CLONE -->
+    <div class="backup-bar">
+      <button class="btn ghost small" id="b-backup-export" title="Télécharge un fichier JSON contenant toutes tes annonces scrapées (sauvegarde locale).">💾 Sauvegarder JSON</button>
+      <input type="file" id="b-backup-import-file" accept="application/json" hidden>
+      <button class="btn ghost small" id="b-backup-import" title="Importe un fichier JSON et republie les annonces manquantes.">📥 Restaurer…</button>
+      <label class="toggle inline backup-toggle" title="Intègre les photos en base64 dans le JSON — portable même après suppression de l'annonce sur LBC, mais fichier plus lourd.">
+        <input type="checkbox" id="b-backup-include-photos">
+        <span class="label">📦 Inclure photos</span>
+      </label>
+      <span class="backup-hint" id="b-backup-status"></span>
+    </div>
 
     <div class="scan-progress" id="b-bump-progress" hidden></div>
 
@@ -77,6 +91,7 @@
     <div class="bump-meta" id="b-bump-meta">
       <span class="bump-meta-last" id="b-meta-last">🕒 Jamais lancé</span>
       <span class="bump-meta-next" id="b-meta-next">⏰ Aucun planning</span>
+      <span class="bump-meta-peak" id="b-meta-peak" hidden></span>
     </div>
 
     <hr>
@@ -92,6 +107,7 @@
     <!-- 5. PLANNING (réglages secondaires) -->
     <details class="section" id="b-planning-section">
       <summary><h2 class="section-title">📅 Planifier (optionnel)</h2></summary>
+      <p class="section-hint" id="b-peak-coverage" hidden></p>
       <label class="toggle">
         <input type="checkbox" id="b-enabled">
         <span class="label">Republier automatiquement</span>
@@ -191,42 +207,6 @@
       <button class="icon-btn small" id="p-profile-rename" title="Renommer">✎</button>
       <button class="icon-btn small" id="p-profile-delete" title="Supprimer cette veille">🗑</button>
     </div>
-
-    <div class="prospect-meta">
-      <div class="stat"><span class="n" id="p-stat-new">–</span><span class="l">Nouveaux</span></div>
-      <div class="stat"><span class="n" id="p-stat-total">–</span><span class="l">Total &lt;30j</span></div>
-      <div class="last-run" id="p-last-run">Jamais scanné</div>
-    </div>
-
-    <div class="row" style="margin-bottom: 10px;">
-      <button class="btn primary" id="p-scan">🔍 Scanner maintenant</button>
-      <button class="btn secondary" id="p-mark-seen" title="Retire le badge NOUV. de toutes les annonces affichées. N'efface rien — c'est juste un reset visuel.">✓ Tout marquer vu</button>
-    </div>
-
-    <div class="scan-progress" id="p-scan-progress" hidden></div>
-
-    <details class="score-help">
-      <summary><strong>Comment marche le score ★ ?</strong></summary>
-      <ul>
-        <li>Chaque mot-clé matché dans le <strong>titre</strong> → <code>+2 × poids</code></li>
-        <li>Matché seulement dans la <strong>description</strong> → <code>+1 × poids</code></li>
-        <li>Le titre contient <em>cherche / recherche / besoin / aide / demande / quelqu'un / conseil</em> → <code>+1</code></li>
-      </ul>
-      Poids par défaut : 1. Pour booster un mot-clé important, écris <code>recalbox:3</code> (poids 3).<br>
-      <strong>Survole le ★ d'une carte</strong> pour voir le détail du calcul.<br>
-      <strong>Score min</strong> = filtre d'affichage. <strong>Notif si score ≥</strong> = seuil pour t'alerter.
-    </details>
-
-    <p class="section-hint" id="p-empty-hint">
-      Le scan interroge l'API leboncoin sur tes mots-clés (par défaut&nbsp;: profils dev/web/IA/automatisation).
-      Premier scan : ~30 à 60 secondes.
-    </p>
-
-    <p class="section-hint small" id="p-scan-limits-hint">ℹ️ Le scan vérifie jusqu'à <strong>1 000 annonces par mot-clé</strong> (limite API leboncoin). Plus tu as de mots-clés, plus c'est long.</p>
-
-    <div class="prospect-list" id="p-list"></div>
-
-    <hr>
 
     <details class="section">
       <summary><h2 class="section-title">⚙️ Réglages de cette veille</h2></summary>
@@ -336,6 +316,40 @@
         <p class="section-hint">Cliquer sur <strong>✉ Contacter</strong> dans une card copie le template (placeholders remplis) dans ton presse-papier et ouvre l'annonce dans un nouvel onglet.</p>
       </div>
     </details>
+
+    <div class="prospect-meta">
+      <div class="stat"><span class="n" id="p-stat-new">–</span><span class="l">Nouveaux</span></div>
+      <div class="stat"><span class="n" id="p-stat-total">–</span><span class="l">Total &lt;30j</span></div>
+      <div class="last-run" id="p-last-run">Jamais scanné</div>
+    </div>
+
+    <div class="row" style="margin-bottom: 10px;">
+      <button class="btn primary" id="p-scan">🔍 Scanner maintenant</button>
+      <button class="btn secondary" id="p-mark-seen" title="Retire le badge NOUV. de toutes les annonces affichées. N'efface rien — c'est juste un reset visuel.">✓ Tout marquer vu</button>
+    </div>
+
+    <div class="scan-progress" id="p-scan-progress" hidden></div>
+
+    <details class="score-help">
+      <summary><strong>Comment marche le score ★ ?</strong></summary>
+      <ul>
+        <li>Chaque mot-clé matché dans le <strong>titre</strong> → <code>+2 × poids</code></li>
+        <li>Matché seulement dans la <strong>description</strong> → <code>+1 × poids</code></li>
+        <li>Le titre contient <em>cherche / recherche / besoin / aide / demande / quelqu'un / conseil</em> → <code>+1</code></li>
+      </ul>
+      Poids par défaut : 1. Pour booster un mot-clé important, écris <code>recalbox:3</code> (poids 3).<br>
+      <strong>Survole le ★ d'une carte</strong> pour voir le détail du calcul.<br>
+      <strong>Score min</strong> = filtre d'affichage. <strong>Notif si score ≥</strong> = seuil pour t'alerter.
+    </details>
+
+    <p class="section-hint" id="p-empty-hint">
+      Le scan interroge l'API leboncoin sur tes mots-clés (par défaut&nbsp;: profils dev/web/IA/automatisation).
+      Premier scan : ~30 à 60 secondes.
+    </p>
+
+    <p class="section-hint small" id="p-scan-limits-hint">ℹ️ Le scan vérifie jusqu'à <strong>1 000 annonces par mot-clé</strong> (limite API leboncoin). Plus tu as de mots-clés, plus c'est long.</p>
+
+    <div class="prospect-list" id="p-list"></div>
   </section>
 
   <script type="module" src="popup.js"></script>

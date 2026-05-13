@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   scoreAd, ageDays, buildSearchPayload, buildEntry,
   sortEntries, runProspectScan, formatReplyTemplate,
-  parseProfileKeywords, explainScore, groupByOwner,
+  parseProfileKeywords, explainScore, groupByOwner, searchKeyword,
   STRONG_SIGNALS, MODERATE_SIGNALS, NEG_SIGNALS, DEMAND_PREFIX, DEMAND_HINTS
 } from '../prospect.js';
 import {
@@ -372,4 +372,31 @@ test('groupByOwner: preserves primary order — [A1, B1, A2] → primaries [A1, 
   assert.equal(groups[0].primary.list_id, 'A1');
   assert.equal(groups[0].others[0].list_id, 'A2');
   assert.equal(groups[1].primary.list_id, 'B1');
+});
+
+// ─── searchKeyword rate-limiting ──────────────────────────────────────────
+
+test('searchKeyword: inserts ≥250ms delay between paginated pages', async () => {
+  // Simulate 200 ads spread over 2 pages (limit=100 each) with a recent date
+  // so the age cutoff doesn't short-circuit after page 1.
+  const recentDate = new Date(Date.now() - 86400000).toISOString(); // 1 day ago
+  const makeAd = (id) => ({ ...adWordpressMetz, list_id: id, first_publication_date: recentDate });
+  const page1 = Array.from({ length: 100 }, (_, i) => makeAd(i + 1));
+  const page2 = Array.from({ length: 100 }, (_, i) => makeAd(i + 101));
+  let callCount = 0;
+  const fetchFn = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    callCount++;
+    const ads = callCount === 1 ? page1 : page2;
+    return { ok: true, status: 200, json: async () => ({ ads, total: 200 }) };
+  };
+
+  const t0 = Date.now();
+  const results = await searchKeyword('wordpress', { maxAgeDays: 90, fetchFn });
+  const elapsed = Date.now() - t0;
+
+  assert.equal(callCount, 2);
+  assert.equal(results.length, 200);
+  // Inter-page sleep is 250ms; allow generous margin for test-runner overhead.
+  assert.ok(elapsed >= 200, `expected ≥200ms inter-page delay, got ${elapsed}ms`);
 });
