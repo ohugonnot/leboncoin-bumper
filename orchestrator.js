@@ -15,7 +15,7 @@ export async function runCycle({ trigger }) {
     tab = await chrome.tabs.create({ url: LISTINGS_URL, active: true });
     await waitForTabLoad(tab.id);
 
-    const listings = await scrapeListings(tab.id);
+    const { listings } = await scrapeListings(tab.id);
     await log(`Found ${listings.length} listing(s).`);
 
     let targets = settings.onlyAdIds?.length
@@ -92,7 +92,19 @@ async function scrapeListings(tabId) {
         const m = href.match(/^\/ad\/([^/]+)\/(\d+)$/);
         const img = card.querySelector('img')?.src || null;
         const title = dedupHalf(link?.textContent || '');
-        const statusText = card.textContent.match(/En cours de v[ée]rification|En ligne|Expir[ée]e|En pause/i)?.[0] || null;
+        // Status detection: the card contains action buttons that imply state.
+        // "Mettre en pause" button → ad is currently online.
+        // "Mettre en ligne" / "Réactiver" / "Republier" → ad is paused.
+        // Earlier regex matched the action button text and produced false positives
+        // ("Mettre en pause" matches /En pause/i → all ads flagged as paused).
+        const btnTexts = [...card.querySelectorAll('button')].map(b => b.textContent.trim());
+        const hasPauseAction = btnTexts.some(t => /^mettre en pause$/i.test(t));
+        const hasResumeAction = btnTexts.some(t => /mettre en ligne|r[ée]activer|republier/i.test(t));
+        let statusText = null;
+        if (hasResumeAction) statusText = 'En pause';
+        else if (hasPauseAction) statusText = 'En ligne';
+        else if (/En cours de v[ée]rification/i.test(card.textContent)) statusText = 'En cours de vérification';
+        else if (/Expir[ée]e/i.test(card.textContent)) statusText = 'Expirée';
         return { id: m?.[2], catSlug: m?.[1] || null, title, href, thumbnail: img, status: statusText };
       }).filter(x => x.id);
       // Pseudo : the listings page header shows "Bonjour <pseudo>" or similar.
