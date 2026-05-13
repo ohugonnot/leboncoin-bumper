@@ -162,9 +162,25 @@ async function doProspectScan(trigger) {
     sortOrder: profile.sortOrder || 'desc'
   };
   // Fetch routed through a leboncoin tab — direct SW fetch is 403'd by DataDome.
-  const { adsByKeyword, contactedAdIds = [] } = await fetchAdsViaTab(keywords, maxAgeDays, adType, apiFilters);
-  // Merge live conversations (API) with the local memory of past contacts
-  // (which survives deletion of conversations on leboncoin's side).
+  // Errors here usually mean : (a) tab couldn't load (network), (b) DataDome
+  // captcha not solved (rare), (c) leboncoin API rate-limited. All recoverable
+  // on next manual scan — but we must surface the failure to the user.
+  let adsByKeyword, contactedAdIds;
+  try {
+    ({ adsByKeyword, contactedAdIds = [] } = await fetchAdsViaTab(keywords, maxAgeDays, adType, apiFilters));
+  } catch (err) {
+    await chrome.storage.local.set({
+      prospectLastRunByProfile: {
+        ...prospectLastRunByProfile,
+        [profile.id]: {
+          ts: new Date().toISOString(),
+          trigger, total: 0, scanned: 0,
+          error: String(err?.message || err)
+        }
+      }
+    });
+    throw err;
+  }
   const allContacted = new Set([...contactedAdIds, ...prospectContactedLocal]);
   const out = processRawAds({
     adsByKeyword, maxAgeDays, minScore,
@@ -228,6 +244,7 @@ async function profileDelete(id) {
     'prospectResultsByProfile', 'prospectSeenIdsByProfile',
     'prospectIgnoredIdsByProfile', 'prospectLastRunByProfile'
   ]);
+  if (!prospectProfiles.some(p => p.id === id)) throw new Error(`unknown profile id: ${id}`);
   if (prospectProfiles.length <= 1) throw new Error('cannot delete the last profile');
   const next = prospectProfiles.filter(p => p.id !== id);
   const nextActive = activeProfileId === id ? next[0].id : activeProfileId;
@@ -269,6 +286,11 @@ async function maybeNotify(results, seenBefore, settings, profile, ignored = new
     priority: 1
   });
   pendingNotificationTarget.set(id, fresh.length === 1 ? top.url : null);
+  // Drop oldest entries if user never clicks notifications (memory cap).
+  if (pendingNotificationTarget.size > 50) {
+    const firstKey = pendingNotificationTarget.keys().next().value;
+    pendingNotificationTarget.delete(firstKey);
+  }
 }
 
 const pendingNotificationTarget = new Map();

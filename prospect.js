@@ -13,8 +13,9 @@ const API_URL = 'https://api.leboncoin.fr/finder/search';
 // It is not a secret; embedding it here keeps the extension self-contained.
 const API_KEY = 'ba0c2dad52b3ec';
 
-/** Default keyword set, tuned for a French full-stack/backend developer profile. */
-export const DEFAULT_KEYWORDS = [
+/** Default keyword set, tuned for a French full-stack/backend developer profile.
+ *  Frozen to prevent accidental mutation across calls. */
+export const DEFAULT_KEYWORDS = Object.freeze([
   'wordpress','prestashop','shopify','magento','symfony','laravel',
   'php','javascript','python','golang','typescript','react native','vuejs',
   'développeur','programmeur','informaticien','webmaster','informatique',
@@ -28,7 +29,7 @@ export const DEFAULT_KEYWORDS = [
   'ffmpeg','montage vidéo','elasticsearch',
   'freelance','mission tech','e-commerce','seo','réparation informatique',
   'bot discord','wix','mobile android'
-];
+]);
 
 /** Strong tech signals — when present in title or body, add a high score boost. */
 export const STRONG_SIGNALS = /\b(symfony|laravel|wordpress|prestashop|magento|shopify|opencart|woocommerce|php\d?\b|golang|nodejs|node\.js|typescript|reactjs|react native|vuejs|vue\.js|fastapi|django|flask|nextjs|next\.js|nuxt|angular|webmaster|fullstack|backend|frontend|ffmpeg|elasticsearch|kubernetes|docker|terraform|aws lambda|chatgpt|openai|llm|prompt engineer|claude\.ai|gemini api|mistral|algo[- ]trading|trading bot|blockchain|web3|nft|defi|smart contract|home assistant|jeedom|raspberry pi|arduino|esp32|esp8266|retropie|recalbox|batocera|retrobat|émulateur|emulateur|retrogaming|r[ée]trogaming|pincab|n8n|zapier|make\.com|automatis|web scrap|scraping|crawler|vba|macro excel|google sheets|tableur complexe|développeur|programmeur|développement web|développement mobile|création de site|cr[ée]ation site|cr[ée]ation web|site internet|site web|application web|application mobile|api rest|crm wordpress|cours d['’]?informatique|aide informatique|formation informatique|lunii|conteuse audio)\b/i;
@@ -46,6 +47,19 @@ export const DEMAND_PREFIX = /^(cherche|recherche|besoin|aide |aidez|demande|qui
 export const DEMAND_HINTS = /\b(cherche|recherche|besoin|aide|aider|aidez|demande|quelqu'un|conseil|conseils|d[ée]pannage|r[ée]paration)\b/i;
 
 function escapeRegex(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+/**
+ * Build a regex that matches `term` with proper word boundaries — including
+ * terms that start/end with non-word chars like "C++", ".NET", "C#". The
+ * naive \b fails there (\b is between word and non-word chars, but both
+ * sides of "+" are non-word).
+ *
+ * We use lookbehind/lookahead on a "word-ish" character class.
+ */
+function termRegex(term) {
+  const W = '[A-Za-zÀ-ÿ0-9_]';
+  return new RegExp(`(?<!${W})${escapeRegex(term)}(?!${W})`, 'i');
+}
 
 /**
  * Parse the user's keyword list. Each entry can be `term` (weight 1) or
@@ -107,7 +121,7 @@ export function explainScore(title, body, profileKeywords) {
   const parsed = parseProfileKeywords(profileKeywords || []);
   let total = 0;
   for (const { term, weight } of parsed) {
-    const re = new RegExp(`\\b${escapeRegex(term)}\\b`, 'i');
+    const re = termRegex(term);
     if (re.test(title)) {
       const pts = weight * 2;
       total += pts; parts.push(`${term} (titre +${pts})`);

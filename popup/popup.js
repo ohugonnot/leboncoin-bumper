@@ -11,7 +11,11 @@ document.getElementById('open-in-tab').addEventListener('click', () => {
 document.querySelectorAll('.tab').forEach(btn => {
   btn.addEventListener('click', () => {
     const target = btn.dataset.tab;
-    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === btn));
+    document.querySelectorAll('.tab').forEach(t => {
+      const active = t === btn;
+      t.classList.toggle('active', active);
+      t.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
     document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.dataset.panel === target));
   });
 });
@@ -333,7 +337,11 @@ function renderProspects(results, lastRun, seenSet, ignoredSet = new Set()) {
   // Hint visibility : show different messages depending on state
   const hint = document.getElementById('p-empty-hint');
   if (hint) {
-    if (results.length > 0) {
+    if (lastRun?.error) {
+      hint.hidden = false;
+      hint.innerHTML = `<strong>⚠ Le scan a échoué :</strong> ${escapeHtml(lastRun.error)}<br>`
+        + `Vérifie que tu es bien connecté à leboncoin.fr puis relance.`;
+    } else if (results.length > 0) {
       hint.hidden = true;
     } else if (lastRun?.ts) {
       // We scanned but got 0 results — give actionable advice
@@ -553,10 +561,16 @@ function escapeHtml(s) {
 }
 function escapeAttr(s) { return escapeHtml(s); }
 
-// Live refresh
+// Live refresh — watch for per-profile storage keys (post-migration to multi-profile).
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.log) renderLog(changes.log.newValue || []);
-  if (changes.prospectResults || changes.prospectLastRun || changes.prospectSeenIds) {
+  if (changes.prospectResultsByProfile
+    || changes.prospectLastRunByProfile
+    || changes.prospectSeenIdsByProfile
+    || changes.prospectIgnoredIdsByProfile
+    || changes.prospectContactedLocal
+    || changes.prospectProfiles
+    || changes.activeProfileId) {
     loadProspect();
   }
   if (changes.myListings || changes.settings) {
