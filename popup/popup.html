@@ -99,10 +99,11 @@
   <section class="panel" data-panel="messages" role="tabpanel" id="panel-messages">
 
     <div class="inbox-meta">
-      <div class="stat"><span class="n" id="m-stat-scam">–</span><span class="l">🚨 Scam</span></div>
-      <div class="stat"><span class="n" id="m-stat-lead">–</span><span class="l">💬 Leads</span></div>
-      <div class="stat"><span class="n" id="m-stat-question">–</span><span class="l">❓ Questions</span></div>
-      <div class="stat"><span class="n" id="m-stat-spam">–</span><span class="l">🗑 Spam</span></div>
+      <div class="stat"><span class="n stat-scam" id="m-stat-scam">–</span><span class="l">🚨 Scam</span></div>
+      <div class="stat"><span class="n stat-lead" id="m-stat-lead">–</span><span class="l">💬 Leads</span></div>
+      <div class="stat"><span class="n stat-question" id="m-stat-question">–</span><span class="l">❓ Questions</span></div>
+      <div class="stat"><span class="n stat-spam" id="m-stat-spam">–</span><span class="l">🗑 Spam</span></div>
+      <div class="stat"><span class="n stat-archived" id="m-stat-archived">–</span><span class="l">📦 Archivés</span></div>
     </div>
 
     <div class="row" style="margin-bottom: 10px;">
@@ -114,12 +115,25 @@
       <div class="banner-content" id="m-error-text"></div>
     </div>
 
+    <details class="score-help" id="m-help">
+      <summary><strong>Comment marche le tri ?</strong></summary>
+      <ul>
+        <li>🚨 <strong>Scam</strong> — patterns d'arnaque détectés (mandat cash, QR, numéro étranger, WhatsApp, lien externe…)</li>
+        <li>💬 <strong>Lead</strong> — message substantiel, vraie question → à traiter</li>
+        <li>❓ <strong>Question</strong> — "toujours dispo ?" et variantes, faible valeur</li>
+        <li>🗑 <strong>Spam</strong> — message vide ou émoji seul</li>
+      </ul>
+      <p><strong>Archiver</strong> = cacher de la liste, <em>local uniquement</em>. Aucun impact côté Leboncoin. Visible dans l'onglet 📦 Archivés.</p>
+      <p>Le tri est <strong>heuristique</strong> : un faux positif scam est possible si le message contient un mot-clé sensible. Survole le détail "Détecté : …" sous chaque card pour comprendre.</p>
+    </details>
+
     <div class="inbox-filter-tabs" role="tablist">
       <button class="inbox-filter active" data-filter="all">Tous</button>
       <button class="inbox-filter cat-scam-filter" data-filter="scam">🚨 Scam</button>
       <button class="inbox-filter cat-lead-filter" data-filter="lead">💬 Leads</button>
       <button class="inbox-filter cat-question-filter" data-filter="question">❓ Questions</button>
       <button class="inbox-filter cat-spam-filter" data-filter="spam">🗑 Spam</button>
+      <button class="inbox-filter cat-archived-filter" data-filter="archived">📦 Archivés</button>
     </div>
 
     <p class="section-hint" id="m-empty-hint">

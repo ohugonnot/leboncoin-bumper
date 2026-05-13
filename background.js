@@ -138,6 +138,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     })();
     return false;
   }
+  if (msg.type === 'INBOX_RESTORE') {
+    respond({ ok: true });
+    (async () => {
+      try {
+        const { inboxDismissed = [] } = await chrome.storage.local.get('inboxDismissed');
+        const next = new Set(inboxDismissed);
+        next.delete(msg.convId);
+        await chrome.storage.local.set({ inboxDismissed: [...next] });
+      } catch (e) { console.warn('INBOX_RESTORE failed:', e); }
+    })();
+    return false;
+  }
   if (msg.type === 'MARK_PROSPECTS_SEEN') {
     respond({ ok: true });
     (async () => {
