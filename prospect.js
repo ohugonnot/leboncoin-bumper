@@ -31,7 +31,7 @@ export const DEFAULT_KEYWORDS = [
 ];
 
 /** Strong tech signals — when present in title or body, add a high score boost. */
-export const STRONG_SIGNALS = /\b(symfony|laravel|wordpress|prestashop|magento|shopify|opencart|woocommerce|php\d?\b|golang|nodejs|node\.js|typescript|reactjs|react native|vuejs|vue\.js|fastapi|django|flask|nextjs|next\.js|nuxt|angular|webmaster|fullstack|backend|frontend|ffmpeg|elasticsearch|kubernetes|docker|terraform|aws lambda|chatgpt|openai|llm|prompt engineer|claude\.ai|gemini api|mistral|algo[- ]trading|trading bot|blockchain|web3|nft|defi|smart contract|home assistant|jeedom|raspberry pi|arduino|esp32|esp8266|retropie|recalbox|émulateur|emulateur|retrogaming|r[ée]trogaming|pincab|n8n|zapier|make\.com|automatis|web scrap|scraping|crawler|vba|macro excel|google sheets|tableur complexe|développeur|programmeur|développement web|développement mobile|création de site|cr[ée]ation site|cr[ée]ation web|site internet|site web|application web|application mobile|api rest|crm wordpress|cours d['’]?informatique|aide informatique|formation informatique|lunii|conteuse audio)\b/i;
+export const STRONG_SIGNALS = /\b(symfony|laravel|wordpress|prestashop|magento|shopify|opencart|woocommerce|php\d?\b|golang|nodejs|node\.js|typescript|reactjs|react native|vuejs|vue\.js|fastapi|django|flask|nextjs|next\.js|nuxt|angular|webmaster|fullstack|backend|frontend|ffmpeg|elasticsearch|kubernetes|docker|terraform|aws lambda|chatgpt|openai|llm|prompt engineer|claude\.ai|gemini api|mistral|algo[- ]trading|trading bot|blockchain|web3|nft|defi|smart contract|home assistant|jeedom|raspberry pi|arduino|esp32|esp8266|retropie|recalbox|batocera|retrobat|émulateur|emulateur|retrogaming|r[ée]trogaming|pincab|n8n|zapier|make\.com|automatis|web scrap|scraping|crawler|vba|macro excel|google sheets|tableur complexe|développeur|programmeur|développement web|développement mobile|création de site|cr[ée]ation site|cr[ée]ation web|site internet|site web|application web|application mobile|api rest|crm wordpress|cours d['’]?informatique|aide informatique|formation informatique|lunii|conteuse audio)\b/i;
 
 /** Moderate signals — broader IT vocabulary, smaller boost. */
 export const MODERATE_SIGNALS = /\b(informatique|ordinateur|logiciel|programmation|code source|site marchand|boutique en ligne|e-commerce|seo\b|référencement|panne pc|réparation pc|dépannage informatique|maintenance pc)\b/i;
@@ -42,17 +42,42 @@ export const NEG_SIGNALS = /\b(m[ée]nage|repassage|jardinage|cuisinier|cuisini[
 /** Titles that start with these words look like genuine demands. */
 export const DEMAND_PREFIX = /^(cherche|recherche|besoin|aide |aidez|demande|qui veut|qui peut)/i;
 
+function escapeRegex(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
 /**
  * Score an ad based on title + body content.
- * Pure function — no IO, deterministic, easy to test.
  *
- * @param {string} title  Ad subject (leboncoin field `subject`).
- * @param {string} body   Ad body (leboncoin field `body`).
- * @returns {number}      0 if the ad should be dropped, otherwise a positive score.
+ * Two modes :
+ *
+ * 1. **Keyword-match scoring** (new, when `profileKeywords` is an array)
+ *    Score = number of distinct profile keywords found in title+body
+ *           + 1 if title starts with a demand prefix (Cherche/Recherche…).
+ *    Intuitive : "score 3" = 3 of your keywords match. Works for any niche.
+ *
+ * 2. **Legacy STRONG/MODERATE scoring** (when profileKeywords is omitted)
+ *    Kept for tests and any caller not yet aware of the new signature.
+ *
+ * Both modes still drop ads matching NEG_SIGNALS in title or body.
+ *
+ * @param {string} title
+ * @param {string} body
+ * @param {string[]} [profileKeywords]  if provided, use keyword-match scoring
  */
-export function scoreAd(title, body) {
+export function scoreAd(title, body, profileKeywords) {
   if (!title || title.trim().length < 8) return 0;
   if (NEG_SIGNALS.test(title) || NEG_SIGNALS.test(body || '')) return 0;
+  if (Array.isArray(profileKeywords)) {
+    const text = `${title} ${body || ''}`;
+    let count = 0;
+    for (const kw of profileKeywords) {
+      if (!kw || String(kw).length < 2) continue;
+      const re = new RegExp(`\\b${escapeRegex(kw)}\\b`, 'i');
+      if (re.test(text)) count++;
+    }
+    if (DEMAND_PREFIX.test(title)) count++;
+    return count;
+  }
+  // Legacy scoring
   let score = 0;
   if (STRONG_SIGNALS.test(title)) score += 5;
   if (STRONG_SIGNALS.test(body || '')) score += 3;
@@ -180,7 +205,8 @@ export function sortEntries(entries) {
  */
 export function processRawAds({
   adsByKeyword, maxAgeDays = 30, minScore = 5,
-  seenIds = new Set(), contactedIds = new Set()
+  seenIds = new Set(), contactedIds = new Set(),
+  profileKeywords
 }) {
   const byId = new Map();
   for (const [kw, ads] of Object.entries(adsByKeyword)) {
@@ -189,7 +215,7 @@ export function processRawAds({
       if (!lid) continue;
       const age = ageDays(ad.first_publication_date);
       if (age === null || age > maxAgeDays) continue;
-      const score = scoreAd(ad.subject || '', ad.body || '');
+      const score = scoreAd(ad.subject || '', ad.body || '', profileKeywords);
       if (score < minScore) continue;
       const entry = buildEntry(ad, { score, kw, isNew: !seenIds.has(lid) });
       entry.already_contacted = contactedIds.has(lid);

@@ -198,3 +198,43 @@ test('formatReplyTemplate: returns empty string for empty template', () => {
   assert.equal(formatReplyTemplate('', { subject: 'X' }), '');
   assert.equal(formatReplyTemplate(null, { subject: 'X' }), '');
 });
+
+// ─── scoreAd: keyword-match mode (new dynamic scoring) ────────────────────
+
+test('scoreAd: keyword-match counts distinct keywords + demand bonus', () => {
+  const s = scoreAd(
+    'Cherche dev WordPress + PrestaShop urgent',
+    'Site existant, besoin de migration PHP 8.',
+    ['wordpress', 'prestashop', 'php']
+  );
+  // wordpress + prestashop in title (2), php in body (1), Cherche prefix (+1) = 4
+  assert.equal(s, 4);
+});
+
+test('scoreAd: keyword-match ignores ads with NEG_SIGNALS', () => {
+  assert.equal(
+    scoreAd('Cherche WordPress femme de ménage', '', ['wordpress']),
+    0
+  );
+});
+
+test('scoreAd: keyword-match returns 0 when no keywords match', () => {
+  const s = scoreAd(
+    'Cherche dev iOS Swift',
+    'Application mobile iOS native, expérience SwiftUI requise',
+    ['wordpress', 'prestashop']
+  );
+  // No keyword match, but DEMAND_PREFIX matches → +1
+  assert.equal(s, 1);
+});
+
+test('scoreAd: keyword-match empty array gives only demand bonus', () => {
+  const s = scoreAd('Cherche developpeur web', 'long body text here', []);
+  assert.equal(s, 1);
+});
+
+test('scoreAd: keyword-match skips too-short keywords (<2 chars)', () => {
+  const s = scoreAd('php is the best', 'long enough body php php php', ['p', 'php']);
+  // 'p' is too short (1 char), only 'php' counts. Not a demand title, no bonus.
+  assert.equal(s, 1);
+});
