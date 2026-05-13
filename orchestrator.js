@@ -76,6 +76,12 @@ export async function runCycle({ trigger }) {
           });
           await deleteListing(tab.id, target.id);
           await log('  deleted.');
+          // La tab est sur la page de confirmation de suppression. Sans re-naviguer
+          // vers /mes-annonces (état neutre), le wizard de dépôt qui suit hérite
+          // d'un état bizarre et timeout silencieusement au step location.
+          // Bug observé en mai 2026 — fix : navigation explicite + petit sleep.
+          await navigate(tab.id, LISTINGS_URL);
+          await sleep(1500);
         }
 
         await chrome.storage.local.set({
