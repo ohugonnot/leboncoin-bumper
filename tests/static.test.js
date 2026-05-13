@@ -104,8 +104,6 @@ describe('DOM IDs — cohérence HTML ↔ JS', () => {
       'p-scan-limits-hint',
       // Tab buttons — referenced via aria-labelledby on tabpanel sections, not getElementById
       'tab-bumper', 'tab-messages', 'tab-prospect',
-      // Static banner — display-only (state CSS via [hidden]), no JS handler needed
-      'b-bump-disabled-banner',
     ];
     const unexpected = unused.filter(id => !knownUnused.includes(id));
     // Fail si de nouveaux orphelins apparaissent (régression HTML)

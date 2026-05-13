@@ -9,24 +9,10 @@ const LISTINGS_URL = `${LBC}/compte/part/mes-annonces`;
 const DEPOSIT_URL = `${LBC}/deposer-une-annonce`;
 const DASHBOARD_API = 'https://api.leboncoin.fr/api/dashboard/v1/search';
 
-// Leboncoin a refondu le wizard de dépôt (mai 2026) : la séquence n'est plus
-// monolithique mais step-by-step, et `input[type="file"]` n'apparaît qu'après
-// validation du titre + de la catégorie. repostListing actuel échoue après le
-// delete, laissant l'annonce perdue. Tant que repostListing n'est pas refait,
-// on force dry-run pour qu'aucun bump réel ne puisse partir et flinguer une
-// annonce. Flippe ce flag à false UNIQUEMENT après avoir adapté repostListing
-// au nouveau wizard.
-const BUMP_REAL_DISABLED = true;
-
 export async function runCycle({ trigger }) {
   const { settings } = await chrome.storage.local.get('settings');
-  await log(`▶ Cycle started (${trigger}). dryRun=${settings.dryRun}, onlyAdIds=${JSON.stringify(settings.onlyAdIds)}`);
-  if (BUMP_REAL_DISABLED && !settings.dryRun) {
-    await log('⚠️ Bump réel temporairement désactivé : wizard de dépôt Leboncoin refondu (mai 2026), fix en cours.');
-    await log('   Le mode test (dry-run) reste utilisable pour valider le scrape. Aucune annonce n\'a été modifiée.');
-    await persistCycleResult({ trigger, count: 0, success: 0, failed: 0 });
-    return { ok: false, error: 'Bump réel temporairement désactivé', success: 0, failed: 0 };
-  }
+  const skipDelete = settings.skipDeleteForTest === true;
+  await log(`▶ Cycle started (${trigger}). dryRun=${settings.dryRun}${skipDelete ? ' [skipDelete]' : ''}, onlyAdIds=${JSON.stringify(settings.onlyAdIds)}`);
 
   let tab;
   let success = 0, failed = 0;
@@ -73,11 +59,15 @@ export async function runCycle({ trigger }) {
           continue;
         }
 
-        await chrome.storage.local.set({
-          bumpProgress: { adIndex: i + 1, adTotal: total, adTitle: target.title, phase: 'delete', at: Date.now() }
-        });
-        await deleteListing(tab.id, target.id);
-        await log('  deleted.');
+        if (skipDelete) {
+          await log('  [skipDelete] delete skipped — testing wizard only. L\'annonce originale reste en ligne, un doublon va être créé.');
+        } else {
+          await chrome.storage.local.set({
+            bumpProgress: { adIndex: i + 1, adTotal: total, adTitle: target.title, phase: 'delete', at: Date.now() }
+          });
+          await deleteListing(tab.id, target.id);
+          await log('  deleted.');
+        }
 
         await chrome.storage.local.set({
           bumpProgress: { adIndex: i + 1, adTotal: total, adTitle: target.title, phase: 'repost', at: Date.now() }
@@ -535,54 +525,56 @@ async function deleteListing(tabId, adId) {
 async function repostListing(tabId, data) {
   await navigate(tabId, DEPOSIT_URL);
   await waitForSelector(tabId, 'input[name="subject"]');
+  await log('    [wizard] step 1: subject + category');
 
-  // Step 1: title → category suggestions → pick by matching slug
   await fillField(tabId, 'input[name="subject"]', data.subject);
   await waitForSelector(tabId, 'input[type="radio"]', 8000).catch(() => {});
-  await sleep(800);
+  await sleep(1200);
 
-  await chrome.scripting.executeScript({
+  const [{ result: radioPick }] = await chrome.scripting.executeScript({
     target: { tabId },
     args: [data.catSlug],
     func: (slug) => {
-      // The original category, e.g. "autres_services" → human "Autres services"
       const wanted = (slug || '').replace(/_/g, ' ').toLowerCase();
       const radios = [...document.querySelectorAll('input[type="radio"]')];
-      // Label format observed: "ServicesAutres services" (parent + sub joined). Match endsWith.
-      const match = radios.find(r => {
-        const lbl = (r.closest('label') || r.parentElement)?.textContent?.trim().toLowerCase() || '';
-        return lbl.endsWith(wanted);
-      });
-      if (match) { match.click(); return; }
-      // Fallback: open the manual dropdown and pick. Not implemented yet — log and fail.
-      throw new Error('category radio not matched for slug=' + slug + '. Manual category selection required.');
+      const labels = radios.map(r => (r.closest('label') || r.parentElement)?.textContent?.trim().toLowerCase() || '');
+      const matchIdx = labels.findIndex(l => l.endsWith(wanted));
+      if (matchIdx >= 0) { radios[matchIdx].click(); return { matched: true, label: labels[matchIdx], suggestions: labels }; }
+      return { matched: false, suggestions: labels };
     }
   });
-  await sleep(400);
-  await clickContinue(tabId);
-
-  // Step 2: photos. Wait for the file input then push the photos via fetch+DataTransfer.
-  await waitForSelector(tabId, 'input[type="file"]');
-  await uploadPhotos(tabId, data.photos);
+  if (!radioPick.matched) {
+    throw new Error(`Catégorie "${data.catSlug}" non suggérée par LBC. Suggestions : ${radioPick.suggestions.join(' | ')}. Renomme l'annonce pour matcher.`);
+  }
+  await log(`    [wizard] step 1: category matched "${radioPick.label}"`);
   await sleep(800);
-  await clickContinue(tabId);
 
-  // Step 3: title + description. Title is pre-filled from step 1, fill the description.
+  // Step 2: photos. Some categories now show the photo step inline after radio
+  // click (no "Continuer" needed). The single `input[type="file"]` with
+  // multiple=true accepts all photos at once; LBC orders them as cover, side
+  // views, etc. Defensive: also handle multi-input designs (1 input per slot).
+  await waitForSelector(tabId, 'input[type="file"]', 15000);
+  await log(`    [wizard] step 2: file input found, uploading ${data.photos.length} photo(s)`);
+  await uploadPhotos(tabId, data.photos);
+  await sleep(1500);
+  await clickContinue(tabId);
+  await log('    [wizard] step 2: photos uploaded, continued');
+
   await waitForSelector(tabId, 'textarea[name="body"]');
   await fillField(tabId, 'textarea[name="body"]', data.body);
-  await sleep(200);
+  await sleep(300);
   await clickContinue(tabId);
+  await log('    [wizard] step 3: description filled');
 
-  // Step 4: price.
   await waitForSelector(tabId, 'input[name="price"]');
   await fillField(tabId, 'input[name="price"]', data.price || '0');
-  await sleep(200);
+  await sleep(300);
   await clickContinue(tabId);
+  await log('    [wizard] step 4: price filled');
 
-  // Step 5: location autocomplete. Type, wait for dropdown, click matching item.
   await waitForSelector(tabId, 'input[name="location"]');
   await fillField(tabId, 'input[name="location"]', data.location);
-  await sleep(1200);
+  await sleep(1500);
   await chrome.scripting.executeScript({
     target: { tabId },
     args: [data.location],
@@ -598,8 +590,8 @@ async function repostListing(tabId, data) {
   });
   await sleep(300);
   await clickContinue(tabId);
+  await log('    [wizard] step 5: location filled');
 
-  // Step 6: coordinates (email/phone are pre-filled). Set phone_hidden to match original.
   await waitForSelector(tabId, 'input[name="phone_hidden"]');
   await chrome.scripting.executeScript({
     target: { tabId },
@@ -612,8 +604,8 @@ async function repostListing(tabId, data) {
   });
   await sleep(200);
   await clickContinue(tabId);
+  await log('    [wizard] step 6: contact prefs set');
 
-  // Step 7: boost upsell page (/options). Pick the free "Déposer sans booster".
   await waitForUrl(tabId, /\/options/);
   await sleep(800);
   await chrome.scripting.executeScript({
@@ -632,7 +624,6 @@ async function repostListing(tabId, data) {
 
 async function uploadPhotos(tabId, photoUrls) {
   if (!photoUrls?.length) return;
-  // Fetch in the SW context (host_permissions cover img.leboncoin.fr), pass base64 to the page.
   const payload = [];
   for (const url of photoUrls) {
     const resp = await fetch(url);
@@ -646,19 +637,31 @@ async function uploadPhotos(tabId, photoUrls) {
     target: { tabId },
     args: [payload],
     func: (items) => {
-      const input = document.querySelector('input[type="file"]');
-      if (!input) throw new Error('file input not found on photos step');
-      const files = items.map((it, i) => {
+      const decode = (it, i) => {
         const bin = atob(it.b64);
         const buf = new Uint8Array(bin.length);
         for (let j = 0; j < bin.length; j++) buf[j] = bin.charCodeAt(j);
         const ext = (it.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
         return new File([buf], `photo-${i + 1}.${ext}`, { type: it.type });
-      });
-      const dt = new DataTransfer();
-      for (const f of files) dt.items.add(f);
-      input.files = dt.files;
-      input.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      const inputs = [...document.querySelectorAll('input[type="file"]')];
+      if (inputs.length === 0) throw new Error('Aucun input[type=file] sur la page photos');
+      // Cas A : un seul input multiple → LBC range les photos par ordre (cover, vues, …).
+      // Cas B : plusieurs inputs single → une photo par input dans l'ordre (futur-proof).
+      if (inputs.length === 1 && inputs[0].multiple !== false) {
+        const dt = new DataTransfer();
+        items.forEach((it, i) => dt.items.add(decode(it, i)));
+        inputs[0].files = dt.files;
+        inputs[0].dispatchEvent(new Event('change', { bubbles: true }));
+      } else {
+        items.forEach((it, i) => {
+          if (i >= inputs.length) return;
+          const dt = new DataTransfer();
+          dt.items.add(decode(it, i));
+          inputs[i].files = dt.files;
+          inputs[i].dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      }
     }
   });
 }
