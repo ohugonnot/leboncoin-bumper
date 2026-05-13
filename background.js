@@ -1,14 +1,7 @@
-// Two scheduled jobs run independently:
-//   - lbc-weekly-bump: deletes & reposts the user's own listings.
-//   - lbc-weekly-prospect: scans leboncoin demands matching the user's tech profile.
-
-// MV3 popups auto-close on blur / tab switch. If a message handler returned
-// `true` (async response promised) and the popup leaves before sendResponse
-// fires, Chrome rejects the channel promise with "message channel closed".
-// The work itself succeeded (written to storage). Mute only this rejection.
-// All of these mean "the peer (popup or tab) vanished mid-operation". Work
-// has already been persisted to chrome.storage in the surviving handlers —
-// silencing only suppresses console noise.
+// MV3 popups auto-close on blur. When a popup awaits an async sendMessage and
+// disappears mid-flight, Chrome rejects with "message channel closed" — but
+// the handler already persisted its result to chrome.storage. Silence only
+// these well-identified peer-gone rejections.
 const POPUP_GONE_RE = /message channel closed|Frame with ID|back\/forward cache|No tab with id|tab was closed|Extension context invalidated|Receiving end does not exist/i;
 self.addEventListener('unhandledrejection', (e) => {
   const text = String(e.reason?.message ?? e.reason ?? '');
@@ -97,20 +90,14 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  // MV3 popups close mid-await (user clicks away or popup auto-dismisses on
-  // blur). sendResponse on a dead channel throws an "unchecked runtime error";
-  // we swallow it because work has already written to chrome.storage and the
-  // popup re-reads on reopen.
   let responded = false;
   const respond = (data) => {
     if (responded) return;
     responded = true;
-    try { sendResponse(data); } catch { /* channel closed */ }
+    try { sendResponse(data); } catch { /* peer gone, see POPUP_GONE_RE */ }
   };
-  // Fast fire-and-forget ops : respond synchronously, do the work after. The
-  // popup never awaits anything useful from these, and an early respond
-  // prevents the "channel closed before response" warning when the popup
-  // closes mid-flight (auto-dismiss on blur, tab switch).
+  // Fast fire-and-forget : respond synchronously so the channel can close
+  // even if the popup dies mid-await ; work continues in the background.
   if (msg.type === 'RESCHEDULE') {
     respond({ ok: true });
     rescheduleBump();

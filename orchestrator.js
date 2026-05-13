@@ -2,7 +2,7 @@
 // Critical rule, learned during E2E mapping: NEVER navigate back in the deposit wizard
 // after a step has been submitted. Going back and re-submitting creates a duplicate listing.
 
-import { decodeJwt, buildMyAdsPayload, normalizeAd } from './my-ads.js';
+import { normalizeAd } from './my-ads.js';
 
 const LBC = 'https://www.leboncoin.fr';
 const LISTINGS_URL = `${LBC}/compte/part/mes-annonces`;
@@ -537,14 +537,6 @@ async function deleteListing(tabId, adId) {
   await waitForText(tabId, 'a bien été prise en compte', 10000);
 }
 
-// ── Wizard 2026 helpers ──────────────────────────────────────────────────────
-
-// catSlug → label humain affiché par LBC dans ses sous-catégories
-function slugToHuman(slug) {
-  return (slug || '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
-  // 'accessoires_informatique' → 'Accessoires informatique'
-}
-
 // catSlug → famille parente cliquable dans le sélecteur de catégories
 function categoryParentFamily(slug) {
   const map = {
@@ -707,8 +699,8 @@ async function repostListing(tabId, data) {
     if (!familyClicked) throw new Error(`[wizard] step 1: famille "${family}" introuvable dans la liste`);
     await sleep(1000);
 
-    // Cliquer la sous-catégorie
-    const humanName = slugToHuman(data.catSlug);
+    // Sous-catégorie : "accessoires_informatique" → "Accessoires informatique"
+    const humanName = (data.catSlug || '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
     const [{ result: subCatResult }] = await chrome.scripting.executeScript({
       target: { tabId }, args: [humanName],
       func: (name) => {
@@ -891,33 +883,17 @@ async function repostListing(tabId, data) {
     const t = await chrome.tabs.get(tabId);
     if (/\/options/.test(t.url || '')) break;
     await sleep(1500);
-    const [{ result: state }] = await chrome.scripting.executeScript({
+    const [{ result: clicked }] = await chrome.scripting.executeScript({
       target: { tabId },
       func: () => {
-        const allHeadings = [...document.querySelectorAll('h1,h2,h3,h4')].map(h => h.textContent?.trim().slice(0, 60));
-        const err = document.querySelector('[role="alert"]')?.textContent?.trim().slice(0, 120) || null;
-        // Find all form sections with their titles + the labels of required fields
-        const requiredLabels = [...document.querySelectorAll('label')]
-          .filter(l => /\*/.test(l.textContent || ''))
-          .map(l => l.textContent?.trim().slice(0, 80));
-        // Find radios (sometimes "mode remise" uses radios)
-        const radioGroups = {};
-        document.querySelectorAll('input[type="radio"]').forEach(r => {
-          const name = r.name || '?';
-          radioGroups[name] = radioGroups[name] || { count: 0, checked: false };
-          radioGroups[name].count++;
-          if (r.checked) radioGroups[name].checked = true;
-        });
-        // List unchecked required radios as suspect
-        const visibleNames = Object.entries(radioGroups).map(([n, info]) => `${n}(${info.count}${info.checked ? ' ✓' : ''})`);
         const btn = [...document.querySelectorAll('button')]
           .find(b => /^continuer$/i.test((b.textContent || '').trim()) && !b.disabled);
-        if (btn) { btn.click(); return { clicked: true, headings: allHeadings, err, requiredLabels, radios: visibleNames }; }
-        return { clicked: false, headings: allHeadings, err, requiredLabels, radios: visibleNames };
+        if (btn) { btn.click(); return true; }
+        return false;
       }
     });
-    await log(`    [wizard] step 6.${extra + 1}: headings=${JSON.stringify(state.headings)} err="${state.err || ''}" required=${JSON.stringify(state.requiredLabels)} radios=${JSON.stringify(state.radios)} clicked=${state.clicked}`);
-    if (!state.clicked) break;
+    await log(`    [wizard] step 6.${extra + 1}: clicked=${clicked}`);
+    if (!clicked) break;
   }
 
   // ── Étape 7 : Options (boost) → Confirmation ─────────────────────────────

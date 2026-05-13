@@ -8,7 +8,7 @@
   <img src="docs/screenshots/prospect-hero.png" width="720" alt="Booster Leboncoin — onglet Prospects : veille multi-profil, scoring pondéré, ignore / contacter en un clic">
 </p>
 
-[![Tests](https://img.shields.io/badge/tests-35%20passing-success)](#tests)
+[![Tests](https://img.shields.io/badge/tests-189%20passing-success)](#tests)
 [![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 [![Manifest](https://img.shields.io/badge/Chrome-MV3-orange)](manifest.json)
 [![No tracking](https://img.shields.io/badge/données-100%25%20local-success)](#vie-privée)
@@ -165,7 +165,7 @@ npm test
 node --test tests/
 ```
 
-**35 tests, ~120 ms.** Couvre : regex de keyword (mots accentués, `C++`, `.NET`, parenthèses), scoring v2 (titre ×2 + poids `:N` + bonus demande), parsing des poids, tri d'affichage (NOUVEAU prioritaire), filtre âge / score / vendeur / livraison, sérialisation des profils.
+**189 tests, ~430 ms.** Couvre : regex de keyword (mots accentués, `C++`, `.NET`, parenthèses), scoring v2 (titre ×2 + poids `:N` + bonus demande), parsing des poids, tri d'affichage (NOUVEAU prioritaire), filtre âge / score / vendeur / livraison, classification messages (scam/lead/question/spam), backup JSON, smart-bump, sérialisation des profils, cohérence DOM IDs popup ↔ HTML.
 
 ## Limitations & avertissement
 
