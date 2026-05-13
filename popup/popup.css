@@ -369,6 +369,7 @@ details.section[open] > summary h2.section-title::before {
 
 .listing {
   display: flex; align-items: center; gap: 14px;
+  flex-wrap: wrap;
   padding: 14px 16px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -653,6 +654,38 @@ details.section[open] > summary h2.section-title::before {
   transition: color .15s, border-color .15s;
 }
 .listing-duplicate:hover { color: var(--orange); border-color: var(--orange); }
+
+/* Edit button inside a listing row */
+.listing-edit-btn {
+  flex-shrink: 0;
+  border: 1px solid var(--border); background: var(--bg);
+  border-radius: 6px; padding: 2px 7px; font-size: 11px;
+  cursor: pointer; color: var(--ink-soft);
+  transition: color .15s, border-color .15s;
+}
+.listing-edit-btn:hover { color: var(--orange); border-color: var(--orange); }
+
+/* Badge shown on listing card when a local edit is pending */
+.listing-edit-badge {
+  display: inline-block; padding: 1px 5px; border-radius: 8px;
+  font-size: 9.5px; font-weight: 600;
+  background: #fff3d6; color: #8a5a00;
+}
+
+/* Inline edit form that drops below the listing row */
+.listing-edit-form {
+  width: 100%;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.listing-edit-hint {
+  font-size: 10px; color: var(--ink-soft); font-style: italic;
+}
+.listing-edit-actions {
+  display: flex; gap: 6px; justify-content: flex-end;
+}
 
 /* Toast */
 .toast {

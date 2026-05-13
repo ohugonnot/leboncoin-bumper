@@ -214,6 +214,117 @@ describe('bumper - renderListings stats', () => {
   });
 });
 
+describe('bumper - éditer avant repost', () => {
+  // Helper: find the first edit button among listing row children
+  function firstEditBtn(listingsEl) {
+    for (const row of listingsEl._children) {
+      for (const child of row._children || []) {
+        if (child._className && child._className.includes('listing-edit-btn')) return child;
+      }
+    }
+    return null;
+  }
+
+  // Helper: find an element by class name within a StubElement tree
+  function findByClass(el, cls) {
+    if (el._className && el._className.includes(cls)) return el;
+    for (const c of [...(el._htmlChildren || []), ...(el._children || [])]) {
+      const found = findByClass(c, cls);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  test('click Éditer → form inline apparaît', async () => {
+    chromeMock._storage.myListings = makeListings(1);
+    chromeMock._storage.settings = BASE_SETTINGS;
+    chromeMock._storage.listingEdits = {};
+    await bumperModule.loadBumper();
+
+    const listingsEl = global.document.getElementById('b-listings');
+    const editBtn = firstEditBtn(listingsEl);
+    assert.ok(editBtn, 'bouton Éditer introuvable dans le DOM');
+
+    editBtn.click();
+    await flushPromises();
+
+    const row = listingsEl._children[0];
+    const form = findByClass(row, 'listing-edit-form');
+    assert.ok(form, 'le form edit ne s\'est pas ouvert');
+  });
+
+  test('remplir subject + Enregistrer → storage contient listingEdits[id]', async () => {
+    chromeMock._storage.myListings = makeListings(1);
+    chromeMock._storage.settings = BASE_SETTINGS;
+    chromeMock._storage.listingEdits = {};
+    await bumperModule.loadBumper();
+
+    const listingsEl = global.document.getElementById('b-listings');
+    const editBtn = firstEditBtn(listingsEl);
+    editBtn.click();
+    await flushPromises();
+
+    const row = listingsEl._children[0];
+    const form = findByClass(row, 'listing-edit-form');
+    assert.ok(form, 'form non trouvé');
+
+    // Fill subject field and save
+    const subjectInput = findByClass(form, 'edit-subject');
+    assert.ok(subjectInput, 'champ subject introuvable');
+    subjectInput.value = 'Nouveau titre test';
+
+    const saveBtn = findByClass(form, 'edit-save-btn');
+    assert.ok(saveBtn, 'bouton save introuvable');
+    saveBtn.click();
+    await flushPromises();
+
+    const stored = chromeMock._storage.listingEdits || {};
+    assert.ok(stored['ad-1'], 'listingEdits[ad-1] absent du storage');
+    assert.equal(stored['ad-1'].subject, 'Nouveau titre test');
+  });
+
+  test('édition existante → badge "Modifié" visible sur la card', async () => {
+    chromeMock._storage.myListings = makeListings(1);
+    chromeMock._storage.settings = BASE_SETTINGS;
+    chromeMock._storage.listingEdits = { 'ad-1': { subject: 'Titre édité' } };
+    await bumperModule.loadBumper();
+
+    const listingsEl = global.document.getElementById('b-listings');
+    // Badge is rendered inside listing-body innerHTML — collect all html
+    function collectHtml(el) {
+      let out = el._innerHTML || '';
+      for (const c of [...(el._htmlChildren || []), ...(el._children || [])]) out += collectHtml(c);
+      return out;
+    }
+    const html = collectHtml(listingsEl);
+    assert.ok(html.includes('Modifié'), `badge "Modifié" absent, got: "${html}"`);
+  });
+
+  test('click Réinitialiser → listingEdits[id] supprimé du storage', async () => {
+    chromeMock._storage.myListings = makeListings(1);
+    chromeMock._storage.settings = BASE_SETTINGS;
+    chromeMock._storage.listingEdits = { 'ad-1': { subject: 'Titre édité' } };
+    await bumperModule.loadBumper();
+
+    const listingsEl = global.document.getElementById('b-listings');
+    const editBtn = firstEditBtn(listingsEl);
+    editBtn.click();
+    await flushPromises();
+
+    const row = listingsEl._children[0];
+    const form = findByClass(row, 'listing-edit-form');
+    assert.ok(form, 'form non trouvé');
+
+    const resetBtn = findByClass(form, 'edit-reset-btn');
+    assert.ok(resetBtn, 'bouton reset introuvable');
+    resetBtn.click();
+    await flushPromises();
+
+    const stored = chromeMock._storage.listingEdits || {};
+    assert.ok(!stored['ad-1'], `listingEdits[ad-1] toujours présent : ${JSON.stringify(stored)}`);
+  });
+});
+
 describe('bumper - initBumper + handlers', () => {
   test('initBumper ne lève pas d\'exception', () => {
     assert.doesNotThrow(() => bumperModule.initBumper());
