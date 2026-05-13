@@ -19,21 +19,16 @@ document.querySelectorAll('.tab').forEach(btn => {
 // ─── Login state ───────────────────────────────────────────────────────────
 async function checkLogin() {
   const warn = document.getElementById('login-banner');
-  const ok = document.getElementById('login-ok-banner');
-  const pseudoEl = document.getElementById('login-pseudo');
+  const dot = document.getElementById('login-dot');
   try {
     const r = await chrome.runtime.sendMessage({ type: 'CHECK_LOGIN' });
-    if (r?.result?.loggedIn) {
-      warn.hidden = true;
-      ok.hidden = false;
-      pseudoEl.textContent = r.result.pseudo ? `· ${r.result.pseudo}` : '';
-    } else {
-      warn.hidden = false;
-      ok.hidden = true;
-    }
+    const ok = !!r?.result?.loggedIn;
+    warn.hidden = ok;
+    dot.hidden = !ok;
+    if (ok && r.result.pseudo) dot.title = `Connecté · ${r.result.pseudo}`;
   } catch {
     warn.hidden = false;
-    ok.hidden = true;
+    dot.hidden = true;
   }
 }
 
@@ -262,8 +257,8 @@ const p = {
 };
 
 async function loadProspect() {
-  const { prospectSettings = {}, prospectResults = [], prospectLastRun, prospectSeenIds = [] } =
-    await chrome.storage.local.get(['prospectSettings', 'prospectResults', 'prospectLastRun', 'prospectSeenIds']);
+  const { prospectSettings = {}, prospectResults = [], prospectLastRun, prospectSeenIds = [], prospectIgnoredIds = [] } =
+    await chrome.storage.local.get(['prospectSettings', 'prospectResults', 'prospectLastRun', 'prospectSeenIds', 'prospectIgnoredIds']);
   p.enabled.checked = !!prospectSettings.enabled;
   p.dayOfWeek.value = prospectSettings.dayOfWeek ?? 1;
   p.hour.value = prospectSettings.hour ?? 10;
@@ -273,13 +268,17 @@ async function loadProspect() {
   p.notifyOnNew.checked = prospectSettings.notifyOnNew !== false;
   p.notifyMinScore.value = prospectSettings.notifyMinScore ?? 7;
   p.replyTemplate.value = prospectSettings.replyTemplate ?? DEFAULT_REPLY_TEMPLATE;
-  renderProspects(prospectResults, prospectLastRun, new Set(prospectSeenIds));
+  renderProspects(prospectResults, prospectLastRun, new Set(prospectSeenIds), new Set(prospectIgnoredIds));
 }
 
-function renderProspects(results, lastRun, seenSet) {
-  const newCount = results.filter(r => !seenSet.has(r.list_id)).length;
+function renderProspects(results, lastRun, seenSet, ignoredSet = new Set()) {
+  const visible = results.filter(r => !ignoredSet.has(r.list_id));
+  const newCount = visible.filter(r => !seenSet.has(r.list_id)).length;
   p.statNew.textContent = newCount;
-  p.statTotal.textContent = results.length;
+  p.statTotal.textContent = visible.length;
+  // Hide the first-scan hint once we have results
+  const hint = document.getElementById('p-empty-hint');
+  if (hint) hint.hidden = results.length > 0;
   if (lastRun?.ts) {
     const d = new Date(lastRun.ts);
     p.lastRun.textContent = `Dernier scan : ${d.toLocaleDateString('fr-FR')} ${d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})} · ${lastRun.scanned || 0} mots-clés`;
@@ -288,7 +287,7 @@ function renderProspects(results, lastRun, seenSet) {
   }
 
   p.list.innerHTML = '';
-  for (const r of results) {
+  for (const r of visible) {
     const isNew = !seenSet.has(r.list_id);
     const card = document.createElement('div');
     card.className = 'card' + (isNew ? ' new' : ' seen');
@@ -305,12 +304,37 @@ function renderProspects(results, lastRun, seenSet) {
       </div>
       <div class="card-body">${escapeHtml((r.body || '').slice(0, 200))}</div>
       <div class="card-actions">
+        <button class="btn ghost small ignore-btn" data-id="${escapeAttr(r.list_id)}" title="Masquer définitivement (ne reviendra pas dans les prochains scans)">✗ Ignorer</button>
         <button class="btn ghost small contact-btn" data-id="${escapeAttr(r.list_id)}">✉ Contacter</button>
       </div>
     `;
     card.querySelector('.contact-btn').addEventListener('click', () => onContact(r));
+    card.querySelector('.ignore-btn').addEventListener('click', () => onIgnore(r));
     p.list.appendChild(card);
   }
+
+  // Footer : count of ignored, with restore action
+  const ignoredCount = results.length - visible.length;
+  if (ignoredCount > 0) {
+    const footer = document.createElement('div');
+    footer.className = 'ignored-footer';
+    footer.innerHTML = `<span class="muted">${ignoredCount} masqué${ignoredCount > 1 ? 's' : ''}</span> <button class="btn ghost small" id="p-restore-ignored">Restaurer tout</button>`;
+    p.list.appendChild(footer);
+    footer.querySelector('#p-restore-ignored').addEventListener('click', onRestoreIgnored);
+  }
+}
+
+async function onIgnore(prospect) {
+  const { prospectIgnoredIds = [] } = await chrome.storage.local.get('prospectIgnoredIds');
+  const next = new Set(prospectIgnoredIds);
+  next.add(prospect.list_id);
+  await chrome.storage.local.set({ prospectIgnoredIds: [...next].slice(-5000) });
+  await loadProspect();
+}
+
+async function onRestoreIgnored() {
+  await chrome.storage.local.set({ prospectIgnoredIds: [] });
+  await loadProspect();
 }
 
 async function onContact(prospect) {
