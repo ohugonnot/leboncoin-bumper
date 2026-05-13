@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Leboncoin Bumper",
-  "version": "0.2.0",
-  "description": "Republie automatiquement tes annonces leboncoin chaque semaine + veille passive sur les demandes tech récentes.",
+  "name": "Booster Leboncoin",
+  "version": "0.3.0",
+  "description": "Republie automatiquement tes annonces Leboncoin chaque semaine et fait la veille des demandes pour freelances tech (dev, web, IA, automatisation).",
   "permissions": [
     "storage",
     "alarms",
@@ -22,7 +22,7 @@
   },
   "action": {
     "default_popup": "popup/popup.html",
-    "default_title": "Leboncoin Bumper"
+    "default_title": "Booster Leboncoin"
   },
   "icons": {
     "16": "icons/icon-16.png",

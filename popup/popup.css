@@ -353,6 +353,13 @@ details.section[open] > summary h2.section-title::before {
 .listing.paused:hover { border-color: var(--border); }
 .listing.paused input[type="checkbox"] { cursor: not-allowed; }
 
+.paused-banner {
+  background: #fff3d6; border: 1px solid #f0c674; color: #8a5a00;
+  padding: 9px 12px; border-radius: 8px; margin-bottom: 8px;
+  font-size: 12px; line-height: 1.45;
+}
+.paused-banner a { color: #8a5a00; font-weight: 600; }
+
 /* Prospect card "Contacter" button */
 .card-actions { margin-top: 6px; text-align: right; }
 .card-actions .contact-btn {

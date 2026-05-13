@@ -78,9 +78,6 @@ async function scrapeListings(tabId) {
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId },
     func: () => {
-      // Leboncoin renders the title twice (mobile + desktop spans) and the second
-      // copy may be truncated. Detect by fingerprinting the first 30 chars and
-      // looking for their second occurrence in the string.
       const dedupHalf = (s) => {
         s = (s || '').trim().replace(/\s+/g, ' ');
         if (s.length < 20) return s;
@@ -89,17 +86,24 @@ async function scrapeListings(tabId) {
         const second = s.indexOf(probe, probeLen);
         return second > 0 ? s.slice(0, second).trim() : s;
       };
-      return [...document.querySelectorAll('li[data-qa-id="ad_item_container"]')].map(card => {
+      const listings = [...document.querySelectorAll('li[data-qa-id="ad_item_container"]')].map(card => {
         const link = card.querySelector('a[href*="/ad/"]');
         const href = link?.getAttribute('href') || '';
         const m = href.match(/^\/ad\/([^/]+)\/(\d+)$/);
-        // First leboncoin thumbnail (preview-thumbnail rule, ~300px wide)
         const img = card.querySelector('img')?.src || null;
         const title = dedupHalf(link?.textContent || '');
-        // Status badge (En ligne / En cours de vérification / etc.)
         const statusText = card.textContent.match(/En cours de v[ée]rification|En ligne|Expir[ée]e|En pause/i)?.[0] || null;
         return { id: m?.[2], catSlug: m?.[1] || null, title, href, thumbnail: img, status: statusText };
       }).filter(x => x.id);
+      // Pseudo : the listings page header shows "Bonjour <pseudo>" or similar.
+      // We probe a few possible selectors; null is fine, it's just a nice-to-have.
+      let pseudo = null;
+      try {
+        pseudo = document.body.innerText.match(/Bonjour\s+([A-Za-zÀ-ÿ0-9_\-\.\s]{2,30})/)?.[1]?.trim()
+              || document.querySelector('[data-qa-id="user-pseudo"], [data-test-id="account-name"]')?.textContent?.trim()
+              || null;
+      } catch { /* ignore */ }
+      return { listings, pseudo };
     }
   });
   return result;
@@ -115,43 +119,29 @@ export async function listUserAds() {
   const tab = await chrome.tabs.create({ url: LISTINGS_URL, active: false });
   try {
     await waitForTabLoad(tab.id);
-    const listings = await scrapeListings(tab.id);
-    return { listings, fetchedAt: new Date().toISOString() };
+    const { listings, pseudo } = await scrapeListings(tab.id);
+    return { listings, pseudo, fetchedAt: new Date().toISOString() };
   } finally {
     await chrome.tabs.remove(tab.id).catch(() => {});
   }
 }
 
 /**
- * Cheap check: are we logged into leboncoin in this Chrome profile?
+ * Login state derived from the cached listings fetch.
  *
- * Strategy: fetch /compte/part/mes-annonces with redirect:'manual'.
- * - 200 → real page rendered → logged in.
- * - opaqueredirect/3xx → redirected to login → not logged in.
+ * The previous strategy (direct fetch from the service worker) was blocked by
+ * DataDome's anti-bot challenge — the SW fetch lacks the JS execution context
+ * DataDome expects, so even an authenticated user got `loggedIn: false`.
+ * `listUserAds()` works because it uses a real tab, which DataDome accepts.
  *
- * Tries to extract the username from the homepage as a bonus.
- *
- * @returns {Promise<{loggedIn: boolean, pseudo?: string}>}
+ * @returns {Promise<{loggedIn: boolean, pseudo?: string, stale?: boolean}>}
  */
 export async function checkLoginStatus() {
-  try {
-    const res = await fetch('https://www.leboncoin.fr/compte/part/mes-annonces', {
-      credentials: 'include', redirect: 'manual'
-    });
-    if (res.status !== 200 || res.type !== 'basic') return { loggedIn: false };
-    // Try to grab pseudo from the homepage HTML (cheap, no extra call cost if cached)
-    let pseudo = null;
-    try {
-      const homeRes = await fetch('https://www.leboncoin.fr/', { credentials: 'include' });
-      const html = await homeRes.text();
-      pseudo = html.match(/"pseudo"\s*:\s*"([^"]+)"/)?.[1]
-            || html.match(/account\/private\/home"[^>]*>([^<]{2,30})</)?.[1]?.trim()
-            || null;
-    } catch { /* non-fatal */ }
-    return { loggedIn: true, pseudo };
-  } catch {
-    return { loggedIn: false };
-  }
+  const { myListings } = await chrome.storage.local.get('myListings');
+  if (!myListings?.listings?.length) return { loggedIn: false };
+  const ageMs = Date.now() - new Date(myListings.fetchedAt || 0).getTime();
+  const stale = ageMs > 7 * 24 * 3600 * 1000;
+  return { loggedIn: true, pseudo: myListings.pseudo || null, stale };
 }
 
 async function scrapeEditPage(tabId, adId) {

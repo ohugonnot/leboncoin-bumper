@@ -111,6 +111,16 @@ function renderListings(stored, selectedIds) {
     ? `${total} annonces · <em>aucune cochée = toutes seront bumpées</em>${ago ? ` · MAJ ${ago}` : ''}`
     : `<strong>${selected} / ${total}</strong> annonces sélectionnées${ago ? ` · MAJ ${ago}` : ''}`;
 
+  const pausedCount = stored.listings.filter(l => /pause/i.test(l.status || '')).length;
+  if (pausedCount === total) {
+    const warn = document.createElement('div');
+    warn.className = 'paused-banner';
+    warn.innerHTML = `<strong>⏸ Toutes tes annonces sont en pause sur leboncoin.</strong><br>`
+      + `Aucune ne peut être republiée tant qu'elles ne sont pas réactivées. `
+      + `<a href="https://www.leboncoin.fr/compte/part/mes-annonces" target="_blank" rel="noopener">Réactiver sur leboncoin →</a>`;
+    b.listings.appendChild(warn);
+  }
+
   for (const it of stored.listings) {
     const isPaused = /pause/i.test(it.status || '');
     const row = document.createElement('label');
@@ -285,7 +295,7 @@ function renderProspects(results, lastRun, seenSet) {
     card.innerHTML = `
       <div class="card-top">
         <a class="card-title" href="${escapeAttr(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.subject)}</a>
-        ${isNew ? '<span class="badge new">NEW</span>' : ''}
+        ${isNew ? '<span class="badge new">NOUV.</span>' : ''}
         <span class="badge score" title="Score de pertinence">★ ${r.score}</span>
       </div>
       <div class="card-meta">
