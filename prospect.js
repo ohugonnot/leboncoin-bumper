@@ -235,15 +235,30 @@ export function buildEntry(ad, { score, kw, isNew }) {
 }
 
 /**
- * Sort: brand-new first, then highest score, then youngest.
+ * Sort entries by the requested display order.
+ *
+ * NEW prospects always bubble to the top (otherwise they get lost in score-
+ * sorted lists). Within new / seen, the chosen order applies.
+ *
+ * @param {object[]} entries
+ * @param {'score'|'time'|'price-asc'|'price-desc'} [order='score']
  */
-export function sortEntries(entries) {
+export function sortEntries(entries, order = 'score') {
+  const cmp = comparators[order] || comparators.score;
   return [...entries].sort((a, b) => {
     if (a.is_new !== b.is_new) return a.is_new ? -1 : 1;
-    if (a.score !== b.score) return b.score - a.score;
-    return a.age_days - b.age_days;
+    return cmp(a, b);
   });
 }
+
+// Sort comparators. Missing prices are pushed to the end regardless of asc/desc.
+const comparators = {
+  score: (a, b) => (b.score - a.score) || (a.age_days - b.age_days),
+  time:  (a, b) => a.age_days - b.age_days,  // age asc = most recent first
+  'price-asc':  (a, b) => priceOr(a, Infinity) - priceOr(b, Infinity),
+  'price-desc': (a, b) => priceOr(b, -Infinity) - priceOr(a, -Infinity),
+};
+function priceOr(e, fallback) { return e.price != null ? e.price : fallback; }
 
 /**
  * Pure post-processing : score → filter → dedup → sort.
@@ -263,7 +278,8 @@ export function processRawAds({
   seenIds = new Set(), contactedIds = new Set(),
   profileKeywords,
   ownerType = 'all',          // 'all' | 'pro' | 'private'
-  shippableOnly = false
+  shippableOnly = false,
+  sortOrder = 'score'         // 'score' | 'time' | 'price-asc' | 'price-desc'
 }) {
   const byId = new Map();
   const usePk = Array.isArray(profileKeywords);
@@ -290,7 +306,7 @@ export function processRawAds({
       if (!prev || prev.score < score) byId.set(lid, entry);
     }
   }
-  const results = sortEntries([...byId.values()]);
+  const results = sortEntries([...byId.values()], sortOrder);
   return { results, scannedKeywords: Object.keys(adsByKeyword).length, total: results.length };
 }
 

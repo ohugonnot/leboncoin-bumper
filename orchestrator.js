@@ -228,8 +228,9 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
                 headers: { 'content-type': 'application/json', 'api_key': API_KEY },
                 credentials: 'include',
                 body: JSON.stringify({
-                  sort_by: extra.sortBy || 'time',
-                  sort_order: extra.sortOrder || 'desc',
+                  // Always time-desc : pagination bails on age cutoff. Display
+                  // sort is applied post-fetch in sortEntries().
+                  sort_by: 'time', sort_order: 'desc',
                   limit: 100, offset, filters
                 })
               });

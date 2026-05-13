@@ -154,12 +154,13 @@ async function doProspectScan(trigger) {
   const maxAgeDays = profile.maxAgeDays || 30;
   const minScore = profile.minScore || 5;
   const adType = profile.adType || 'demand';
+  // API is always queried in `time desc` order : this lets the pagination
+  // loop bail out as soon as ads exceed maxAgeDays. Display sort is applied
+  // post-fetch by sortEntries() based on profile.sortOrder.
   const apiFilters = {
     priceMin: profile.priceMin,
     priceMax: profile.priceMax,
-    departments: profile.departments || [],
-    sortBy: profile.sortBy || 'time',
-    sortOrder: profile.sortOrder || 'desc'
+    departments: profile.departments || []
   };
   // Fetch routed through a leboncoin tab — direct SW fetch is 403'd by DataDome.
   // Errors here usually mean : (a) tab couldn't load (network), (b) DataDome
@@ -187,7 +188,8 @@ async function doProspectScan(trigger) {
     seenIds: seen, contactedIds: allContacted,
     profileKeywords: keywords,
     ownerType: profile.ownerType || 'all',
-    shippableOnly: !!profile.shippableOnly
+    shippableOnly: !!profile.shippableOnly,
+    sortOrder: profile.sortOrder || 'score'
   });
   await chrome.storage.local.set({
     prospectResultsByProfile: { ...prospectResultsByProfile, [profile.id]: out.results },
@@ -215,8 +217,7 @@ async function profileCreate(name) {
     minScore: 1, maxAgeDays: 30, adType: 'demand',
     priceMin: null, priceMax: null,
     departments: [],     // array of FR dept codes (strings : "25", "2A", "75")
-    sortBy: 'time',      // 'time' | 'price'
-    sortOrder: 'desc',   // 'asc' | 'desc'
+    sortOrder: 'score',  // 'score' | 'time' | 'price-asc' | 'price-desc' — display sort
     ownerType: 'all',    // 'all' | 'pro' | 'private'
     shippableOnly: false,
     replyTemplate: ''
