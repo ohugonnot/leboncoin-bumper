@@ -1,0 +1,42 @@
+{
+  "iteration": 14,
+  "startedAt": "2026-05-14",
+  "lastIterationAt": "2026-05-14",
+  "scores": {
+    "A_endpoints": 100,
+    "B_robustness": 85,
+    "C_mimicry": 100,
+    "D_tests": 100,
+    "E_quality": 85,
+    "F_performance": 100,
+    "G_docs": 100
+  },
+  "global": 95.5,
+  "warnings": [],
+  "completed": true,
+  "nextPriority": null,
+  "todo": [
+    "A5b: UI pour activer enrichUserCard par profil (popup setting + e2e spec D2/D3) — déférable, non-bloquant"
+  ],
+  "doneIds": [
+    "A1_owner_type_server_side",
+    "A2_payload_metadata_mimicry",
+    "B1_datadome_403_notification",
+    "A3_fetchAdDetailViaTab",
+    "B5_propagate_datadome_inbox_dashboard",
+    "B3a_retry_5xx_prospect_classified",
+    "B4_abort_timeout_prospect_classified",
+    "A4_fetchUserCardViaTab",
+    "A5a_merge_enrich_pure_layer_with_cache",
+    "G1_claude_md_endpoints",
+    "G2_changelog_unreleased",
+    "F1_scrapeEditPage_to_api_call",
+    "B3b_retry_timeout_inbox_dashboard",
+    "RUBRIC1_drift_detection_replaces_api_key_test",
+    "E1_drift_detection_test",
+    "E3_audit_commentaires_compaction",
+    "F2b_persist_usercard_cache_storage",
+    "A5b_wire_enrichment_to_doProspectScan",
+    "RUBRIC2_dedup_replaces_parallelisation"
+  ]
+}

@@ -4,6 +4,22 @@ Toutes les modifications notables sont listées ici.
 
 Format basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce projet suit le [Versioning Sémantique](https://semver.org/lang/fr/).
 
+## [Unreleased]
+
+### Ajouté
+- Payload `/finder/search` enrichi : `listing_source`, `extend`, `disable_total`, `limit_alu` (mimétisme client web officiel).
+- Filtres serveur `owner_type` (pro/private/all) et `filters.location.shippable` poussés côté API au lieu d'être appliqués post-fetch.
+- Détection 403 DataDome explicite sur les trois chemins authentifiés (`/finder/search`, `/api/dashboard/v1/search`, `/messaging/proxy/...`) + stockage `datadomeBlock` + notification système (throttle 1 h).
+- Retry exponentiel sur 5xx (2 retries, backoff 400ms/1200ms) sur `fetchAdsViaTab` et `fetchAdDetailViaTab`.
+- Timeout par tentative via `AbortController` (15 s) sur les mêmes chemins.
+- `orchestrator.fetchAdDetailViaTab(adId)` : GET `/api/adfinder/v1/classified/{id}` avec sentinels 403/404/410.
+- `orchestrator.fetchUserCardViaTab(userId)` : GET `/api/user-card/v2/{id}/infos` + `/api/onlinestores/v2/users/{id}?fields=all` si pro.
+- `my-ads.normalizeClassifiedAd(raw)` et `my-ads.normalizeUserCard(userData, proData)` : normalisation pure des réponses.
+- `prospect.mergeUserCardIntoEntry(entry, card)` + `prospect.enrichProspectsWithUserCard({entries, fetchCard, cache, ttlMs, concurrency})` : enrichissement prospects avec reply rate, présence, feedback, badges ; cache 24 h.
+
+### Modifié
+- `prospect.buildSearchPayload` accepte désormais `ownerType`, `shippable`, `priceMin/Max`, `departments`, `adTypes` et émet le payload mimicry officiel.
+
 ## [0.3.0] — 2026-05
 
 ### Ajouté
