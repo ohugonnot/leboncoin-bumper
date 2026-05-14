@@ -8,9 +8,8 @@ self.addEventListener('unhandledrejection', (e) => {
   if (POPUP_GONE_RE.test(text)) e.preventDefault();
 });
 
-import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm, fetchInboxViaTab, fetchMyAdsViaApi, fetchUserCardViaTab } from './orchestrator.js';
-import { processRawAds, markResultsSeen, DEFAULT_KEYWORDS, enrichProspectsWithUserCard } from './prospect.js';
-import { normalizeUserCard } from './my-ads.js';
+import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm, fetchInboxViaTab, fetchMyAdsViaApi } from './orchestrator.js';
+import { processRawAds, markResultsSeen, DEFAULT_KEYWORDS } from './prospect.js';
 import { classifyConversations } from './messaging.js';
 
 const BUMP_ALARM = 'lbc-weekly-bump';
@@ -278,12 +277,6 @@ async function doProspectScan(trigger) {
     shippableOnly: !!profile.shippableOnly,
     sortOrder: profile.sortOrder || 'score'
   });
-  // Opt-in : enrichir top-N résultats avec /api/user-card. Coûteux (N tabs ouvertes
-  // séquentiellement) — limité à enrichTopN entrées pour éviter DataDome thrash.
-  if (profile.enrichUserCard) {
-    const topN = Math.max(1, Math.min(20, profile.enrichTopN || 10));
-    out.results = await enrichTopResults(out.results, topN);
-  }
   await chrome.storage.local.set({
     prospectResultsByProfile: { ...prospectResultsByProfile, [profile.id]: out.results },
     prospectLastRunByProfile: {
@@ -294,28 +287,6 @@ async function doProspectScan(trigger) {
   const ignored = new Set(prospectIgnoredIdsByProfile[profile.id] || []);
   await maybeNotify(out.results, seen, prospectGlobalSettings, profile, ignored);
   return out;
-}
-
-// Persisted cache lives in chrome.storage.local.userCardCache. Loaded once,
-// passed in/out of enrichProspectsWithUserCard, saved back after.
-async function enrichTopResults(results, topN) {
-  if (!results?.length) return results;
-  const top = results.slice(0, topN);
-  const rest = results.slice(topN);
-  const { userCardCache = {} } = await chrome.storage.local.get('userCardCache');
-
-  const fetchCard = async (userId) => {
-    const res = await fetchUserCardViaTab(userId);
-    if (res?.datadomeBlocked) { await notifyDatadomeBlock('user-card'); return null; }
-    if (res?.notFound || res?.error || !res?.userData) return null;
-    return normalizeUserCard(res.userData, res.proData);
-  };
-
-  const { entries: enrichedTop, cache: newCache } = await enrichProspectsWithUserCard({
-    entries: top, fetchCard, cache: userCardCache
-  });
-  await chrome.storage.local.set({ userCardCache: newCache });
-  return [...enrichedTop, ...rest];
 }
 
 async function profileCreate(name) {

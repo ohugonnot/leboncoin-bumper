@@ -556,7 +556,13 @@ export async function fetchAdDetailViaTab(adId) {
           const ac = new AbortController();
           const tid = setTimeout(() => ac.abort(), 15000);
           try {
-            r = await fetch(url, { credentials: 'include', signal: ac.signal });
+            // api_key obligatoire sur /classified/{id} : sans header → 403 DataDome
+            // systematique. Validé en live le 2026-05-14 sur 6 annonces réelles.
+            r = await fetch(url, {
+              credentials: 'include',
+              headers: { 'api_key': 'ba0c2dad52b3ec' },
+              signal: ac.signal
+            });
             if (r.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
           } catch (e) {
             clearTimeout(tid);
@@ -581,65 +587,17 @@ export async function fetchAdDetailViaTab(adId) {
   }
 }
 
-/**
- * GET /api/user-card/v2/{userId}/infos via an LBC tab. If `account_type === 'pro'`,
- * chain `/api/onlinestores/v2/users/{userId}?fields=all` (404 tolerated — some pros
- * lack a public storefront).
- *
- * Returns `{ userData, proData }` (raw, normalise via my-ads.normalizeUserCard)
- * or sentinel : `{ datadomeBlocked }`, `{ notFound }`, `{ error }`.
- */
-export async function fetchUserCardViaTab(userId) {
-  if (!userId) throw new Error('missing userId');
-  const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
-  try {
-    await waitForTabLoad(tab.id);
-    const [{ result }] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      args: [String(userId)],
-      func: async (uid) => {
-        const fetchOnce = async (url) => {
-          let r, attempt = 0;
-          const backoffs = [400, 1200];
-          while (true) {
-            const ac = new AbortController();
-            const tid = setTimeout(() => ac.abort(), 15000);
-            try {
-              r = await fetch(url, { credentials: 'include', signal: ac.signal });
-              if (r.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
-            } catch (e) {
-              clearTimeout(tid);
-              if (attempt >= backoffs.length) return { error: String(e?.message || e) };
-            }
-            clearTimeout(tid);
-            await new Promise(res => setTimeout(res, backoffs[attempt++]));
-          }
-          if (r.status === 403) return { datadomeBlocked: true };
-          if (r.status === 404 || r.status === 410) return { notFound: true };
-          if (!r.ok) return { error: `HTTP ${r.status}` };
-          try { return { raw: await r.json() }; }
-          catch (e) { return { error: String(e?.message || e) }; }
-        };
-
-        const userRes = await fetchOnce(`https://api.leboncoin.fr/api/user-card/v2/${uid}/infos`);
-        if (userRes.datadomeBlocked || userRes.notFound || userRes.error) return userRes;
-        const userData = userRes.raw;
-
-        // Storefront only exists for pros, and not all pros have a public page.
-        let proData = null;
-        if (userData?.account_type === 'pro') {
-          const proRes = await fetchOnce(`https://api.leboncoin.fr/api/onlinestores/v2/users/${uid}?fields=all`);
-          if (proRes.datadomeBlocked) return proRes; // surface to caller
-          if (!proRes.notFound && !proRes.error) proData = proRes.raw ?? null;
-        }
-        return { userData, proData };
-      }
-    });
-    return result || { error: 'no result' };
-  } finally {
-    await chrome.tabs.remove(tab.id).catch(() => {});
-  }
-}
+// fetchUserCardViaTab(userId) retiré le 2026-05-14 : /api/user-card/v2/{id}/infos
+// est un endpoint mobile-only. Validé en live → "Failed to fetch" systematique
+// depuis browser origin (DataDome rejette au niveau TLS, même avec api_key).
+// Pour ré-implémenter une fetch user-card cote web, agréger depuis :
+//   - /api/users/v1/users/{uid}/account-type
+//   - /api/adfinder/v2/owner_listing (ads du vendeur)
+//   - /api/followme/v1/followers-number/{uid}
+//   - /api/profile-picture/v1/users/{uid}/picture
+// La couche pure (my-ads.normalizeUserCard, prospect.mergeUserCardIntoEntry,
+// prospect.enrichProspectsWithUserCard) est conservée — elle reste utilisable
+// dès qu'un nouveau fetcher web-compatible sera branché dessus.
 
 /**
  * Open leboncoin's /reply/{adId} form pre-filled with `message` and bring the
@@ -686,7 +644,12 @@ async function scrapeEditPage(tabId, adId) {
         const ac = new AbortController();
         const tid = setTimeout(() => ac.abort(), 15000);
         try {
-          r = await fetch(url, { credentials: 'include', signal: ac.signal });
+          // api_key obligatoire (cf. fetchAdDetailViaTab).
+          r = await fetch(url, {
+            credentials: 'include',
+            headers: { 'api_key': 'ba0c2dad52b3ec' },
+            signal: ac.signal
+          });
           if (r.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
         } catch (e) {
           clearTimeout(tid);
