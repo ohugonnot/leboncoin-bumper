@@ -6,11 +6,15 @@
 - `api_key: 'ba0c2dad52b3ec'` = clé publique du client web LBC, visible dans toute requête navigateur. Non secret.
 
 ## Endpoints LBC utilisés
-- `POST /finder/search` — anonyme, prospect scan. Payload mimique le site (`listing_source`, `extend`, `disable_total`, `limit_alu`).
-- `GET /api/adfinder/v1/classified/{id}` — anonyme, détail d'une annonce. Sentinels : 403/404/410/error.
-- `GET /api/user-card/v2/{id}/infos` — anonyme, profil public (feedback, reply rate, presence). Chain avec `/api/onlinestores/v2/users/{id}?fields=all` si `account_type === 'pro'` (404 toléré : pros sans page publique).
-- `POST /api/dashboard/v1/search` — **auth Bearer JWT** (`localStorage.luat`), dashboard utilisateur.
+- `POST /finder/search` — anonyme, prospect scan. Header `api_key: ba0c2dad52b3ec` requis. Payload mimique le site (`listing_source`, `extend`, `disable_total`, `limit_alu`).
+- `GET /api/adfinder/v1/classified/{id}` — anonyme, détail d'une annonce. **Header `api_key` obligatoire** (sinon 403 systématique, validé live 2026-05-14). Sentinels : 403/404/410/error.
+- `POST /api/dashboard/v1/search` — **auth Bearer JWT** (`localStorage.luat`), dashboard utilisateur. Pas d'api_key.
 - `GET /messaging/proxy/api/v1/hal/{userId}/conversations` — **auth Bearer JWT**, userId dans cookie `lbc_user_id`. Pagination HAL via `_links.next`.
+
+## Endpoints LBC à éviter / non-fonctionnels
+- `GET /api/user-card/v2/{id}/infos` : **mobile-only**. Depuis browser → "Failed to fetch" même avec api_key (DataDome rejette au niveau TLS, validé live 2026-05-14). La lib `etienne-hd/lbc` y arrive parce qu'elle impersonne un UA mobile + TLS fingerprint mobile via curl_cffi.
+- Le web client LBC ne consomme PAS cet endpoint : il agrège depuis `/api/users/v1/users/{uid}/account-type`, `/api/adfinder/v2/owner_listing`, `/api/followme/v1/followers-number/{uid}`, `/api/profile-picture/v1/users/{uid}/picture`. Pour ré-implémenter un user-card cote web, agréger depuis ces endpoints.
+- Conséquence : `normalizeUserCard`, `mergeUserCardIntoEntry`, `enrichProspectsWithUserCard` (couche pure) sont conservés mais sans consumer cote prod tant qu'aucun fetcher web n'est branché.
 
 ## Auth — pièges
 - `localStorage.luat` = JWT court. Décodé sans vérif (`my-ads.decodeJwt`) pour extraire `account_id`.

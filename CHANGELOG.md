@@ -12,13 +12,21 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce
 - Détection 403 DataDome explicite sur les trois chemins authentifiés (`/finder/search`, `/api/dashboard/v1/search`, `/messaging/proxy/...`) + stockage `datadomeBlock` + notification système (throttle 1 h).
 - Retry exponentiel sur 5xx (2 retries, backoff 400ms/1200ms) sur `fetchAdsViaTab` et `fetchAdDetailViaTab`.
 - Timeout par tentative via `AbortController` (15 s) sur les mêmes chemins.
-- `orchestrator.fetchAdDetailViaTab(adId)` : GET `/api/adfinder/v1/classified/{id}` avec sentinels 403/404/410.
-- `orchestrator.fetchUserCardViaTab(userId)` : GET `/api/user-card/v2/{id}/infos` + `/api/onlinestores/v2/users/{id}?fields=all` si pro.
+- `orchestrator.fetchAdDetailViaTab(adId)` : GET `/api/adfinder/v1/classified/{id}` (avec header `api_key`) ; sentinels 403/404/410.
 - `my-ads.normalizeClassifiedAd(raw)` et `my-ads.normalizeUserCard(userData, proData)` : normalisation pure des réponses.
-- `prospect.mergeUserCardIntoEntry(entry, card)` + `prospect.enrichProspectsWithUserCard({entries, fetchCard, cache, ttlMs, concurrency})` : enrichissement prospects avec reply rate, présence, feedback, badges ; cache 24 h.
+- `prospect.mergeUserCardIntoEntry(entry, card)` + `prospect.enrichProspectsWithUserCard({entries, fetchCard, cache, ttlMs, concurrency})` : enrichissement prospects (sans consumer prod, voir Retiré).
+- Test e2e `tests/e2e/extension.spec.js` qui charge l'extension MV3 reelle dans Chromium et catch les violations CSP.
 
 ### Modifié
 - `prospect.buildSearchPayload` accepte désormais `ownerType`, `shippable`, `priceMin/Max`, `departments`, `adTypes` et émet le payload mimicry officiel.
+- `scrapeEditPage(tabId, adId)` : utilise `/api/adfinder/v1/classified/{id}` avec `api_key` au lieu de DOM-scraper /editer (~3x plus rapide, résiste aux redesigns).
+
+### Retiré
+- `orchestrator.fetchUserCardViaTab` et le wiring `background.enrichTopResults` : validation live 2026-05-14 a montré que `/api/user-card/v2/{id}/infos` est mobile-only — depuis browser, "Failed to fetch" systématique (DataDome TLS-reject). La couche pure (`normalizeUserCard`, `mergeUserCardIntoEntry`, `enrichProspectsWithUserCard`) est conservée et reste réutilisable dès qu'un fetcher web compatible sera branché.
+
+### Fix
+- `fetchAdDetailViaTab` + `scrapeEditPage` : ajout du header `api_key: ba0c2dad52b3ec` — sans lui, 403 DataDome systematique sur `/classified/{id}` (constaté en live).
+- `manifest.json` : CSP `style-src 'self' 'unsafe-inline'` ajouté — sans ça, le popup déclenchait 17 violations CSP sur les `style="..."` HTML et `element.style.X = ...` JS.
 
 ## [0.3.0] — 2026-05
 
