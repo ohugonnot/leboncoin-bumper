@@ -1,9 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import {
   scoreAd, ageDays, buildSearchPayload, buildEntry,
   sortEntries, runProspectScan, formatReplyTemplate,
   parseProfileKeywords, explainScore, groupByOwner, searchKeyword,
+  mergeUserCardIntoEntry, enrichProspectsWithUserCard,
   STRONG_SIGNALS, MODERATE_SIGNALS, NEG_SIGNALS, DEMAND_PREFIX, DEMAND_HINTS
 } from '../prospect.js';
 import {
@@ -76,6 +80,51 @@ test('buildSearchPayload: respects custom offset', () => {
   const p = buildSearchPayload({ keyword: 'php', offset: 200, limit: 50 });
   assert.equal(p.offset, 200);
   assert.equal(p.limit, 50);
+});
+
+test('buildSearchPayload: mimicks official client metadata', () => {
+  const p0 = buildSearchPayload({ keyword: 'x' });
+  assert.equal(p0.disable_total, true);
+  assert.equal(p0.extend, true);
+  assert.equal(p0.limit_alu, 0);
+  assert.equal(p0.listing_source, 'direct-search');
+
+  const p1 = buildSearchPayload({ keyword: 'x', offset: 100 });
+  assert.equal(p1.listing_source, 'pagination');
+});
+
+test('buildSearchPayload: pushes owner_type server-side (skip when all)', () => {
+  const allP = buildSearchPayload({ keyword: 'x', ownerType: 'all' });
+  assert.equal(allP.owner_type, undefined);
+
+  const proP = buildSearchPayload({ keyword: 'x', ownerType: 'pro' });
+  assert.equal(proP.owner_type, 'pro');
+
+  const privP = buildSearchPayload({ keyword: 'x', ownerType: 'private' });
+  assert.equal(privP.owner_type, 'private');
+});
+
+test('buildSearchPayload: pushes shippable into filters.location', () => {
+  const p = buildSearchPayload({ keyword: 'x', shippable: true });
+  assert.equal(p.filters.location.shippable, true);
+});
+
+test('buildSearchPayload: shippable composes with departments', () => {
+  const p = buildSearchPayload({ keyword: 'x', shippable: true, departments: ['75', '92'] });
+  assert.deepEqual(p.filters.location, { departments: ['75', '92'], shippable: true });
+});
+
+test('buildSearchPayload: price range', () => {
+  const p = buildSearchPayload({ keyword: 'x', priceMin: 100, priceMax: 500 });
+  assert.deepEqual(p.filters.ranges, { price: { min: 100, max: 500 } });
+
+  const pMinOnly = buildSearchPayload({ keyword: 'x', priceMin: 100 });
+  assert.deepEqual(pMinOnly.filters.ranges, { price: { min: 100 } });
+});
+
+test('buildSearchPayload: custom adTypes', () => {
+  const p = buildSearchPayload({ keyword: 'x', adTypes: ['demand', 'offer'] });
+  assert.deepEqual(p.filters.enums.ad_type, ['demand', 'offer']);
 });
 
 // ─── buildEntry ───────────────────────────────────────────────────────────
@@ -399,4 +448,151 @@ test('searchKeyword: inserts ≥250ms delay between paginated pages', async () =
   assert.equal(results.length, 200);
   // Inter-page sleep is 250ms; allow generous margin for test-runner overhead.
   assert.ok(elapsed >= 200, `expected ≥200ms inter-page delay, got ${elapsed}ms`);
+});
+
+// ─── mergeUserCardIntoEntry / enrichProspectsWithUserCard ─────────────────
+
+const baseEntry = {
+  list_id: 'a1', subject: 'X', body: '', category_name: 'Y', url: '', price: null,
+  location: 'Paris', first_publication_date: '2026-05-01', age_days: 5,
+  score: 7, kw_hit: 'wordpress', is_new: true, owner_id: 'u-1', owner_name: 'Alice', owner_type: 'private'
+};
+
+const fullCard = {
+  id: 'u-1', name: 'Alice', registeredAt: '2020-01-15', accountType: 'private',
+  totalAds: 12, isPro: false,
+  reply: { rate: 85, inMinutes: 12 },
+  presence: { status: 'online', lastActivity: '2026-05-14T09:00:00Z' },
+  feedback: { score: 4.5, receivedCount: 30 },
+  badges: [{ type: 'identity_verified', name: 'Id' }, { type: 'phone', name: 'Tel' }]
+};
+
+test('mergeUserCardIntoEntry: copies reply/presence/feedback/badges', () => {
+  const e = mergeUserCardIntoEntry(baseEntry, fullCard);
+  assert.equal(e.user_reply_rate, 85);
+  assert.equal(e.user_reply_minutes, 12);
+  assert.equal(e.user_presence_status, 'online');
+  assert.equal(e.user_feedback_score, 4.5);
+  assert.equal(e.user_feedback_count, 30);
+  assert.equal(e.user_total_ads, 12);
+  assert.equal(e.user_is_pro, false);
+  assert.deepEqual(e.user_badges, ['identity_verified', 'phone']);
+});
+
+test('mergeUserCardIntoEntry: null card → entry untouched', () => {
+  const e = mergeUserCardIntoEntry(baseEntry, null);
+  assert.equal(e, baseEntry);
+});
+
+test('mergeUserCardIntoEntry: missing reply/presence/feedback → null fields, no throw', () => {
+  const e = mergeUserCardIntoEntry(baseEntry, { id: 'u-1' });
+  assert.equal(e.user_reply_rate, null);
+  assert.equal(e.user_presence_status, null);
+  assert.equal(e.user_feedback_score, null);
+  assert.equal(e.user_feedback_count, 0);
+});
+
+test('enrichProspectsWithUserCard: fetches only unique owners, populates cache', async () => {
+  const e1 = { ...baseEntry, owner_id: 'u-1' };
+  const e2 = { ...baseEntry, list_id: 'a2', owner_id: 'u-2' };
+  const e3 = { ...baseEntry, list_id: 'a3', owner_id: 'u-1' }; // dupe
+  let calls = 0;
+  const fetchCard = async (uid) => { calls++; return { ...fullCard, id: uid }; };
+
+  const out = await enrichProspectsWithUserCard({
+    entries: [e1, e2, e3], fetchCard
+  });
+
+  assert.equal(calls, 2, 'should dedupe by owner_id');
+  assert.ok(out.cache['u-1']);
+  assert.ok(out.cache['u-2']);
+  assert.equal(out.entries[0].user_reply_rate, 85);
+  assert.equal(out.entries[2].user_reply_rate, 85);
+});
+
+test('enrichProspectsWithUserCard: respects TTL cache hit', async () => {
+  const cache = { 'u-1': { card: fullCard, at: Date.now() } };
+  let calls = 0;
+  const fetchCard = async () => { calls++; return fullCard; };
+
+  await enrichProspectsWithUserCard({
+    entries: [{ ...baseEntry, owner_id: 'u-1' }],
+    fetchCard, cache, ttlMs: 86400_000
+  });
+
+  assert.equal(calls, 0, 'fresh cache → no fetch');
+});
+
+test('enrichProspectsWithUserCard: TTL expired triggers re-fetch', async () => {
+  const cache = { 'u-1': { card: fullCard, at: Date.now() - 2 * 86400_000 } };
+  let calls = 0;
+  const fetchCard = async () => { calls++; return fullCard; };
+
+  await enrichProspectsWithUserCard({
+    entries: [{ ...baseEntry, owner_id: 'u-1' }],
+    fetchCard, cache, ttlMs: 86400_000
+  });
+
+  assert.equal(calls, 1, 'stale cache → fetch');
+});
+
+test('enrichProspectsWithUserCard: fetchCard throws → entry kept without enrichment', async () => {
+  const fetchCard = async () => { throw new Error('boom'); };
+  const out = await enrichProspectsWithUserCard({
+    entries: [{ ...baseEntry, owner_id: 'u-1' }], fetchCard
+  });
+  assert.equal(out.entries[0].user_reply_rate, undefined);
+});
+
+test('enrichProspectsWithUserCard: empty entries → noop', async () => {
+  const out = await enrichProspectsWithUserCard({ entries: [], fetchCard: async () => fullCard });
+  assert.deepEqual(out.entries, []);
+});
+
+test('enrichProspectsWithUserCard: entries with no owner_id are skipped', async () => {
+  let calls = 0;
+  const fetchCard = async () => { calls++; return fullCard; };
+  await enrichProspectsWithUserCard({
+    entries: [{ ...baseEntry, owner_id: '' }, { ...baseEntry, owner_id: null }],
+    fetchCard
+  });
+  assert.equal(calls, 0);
+});
+
+// ─── Drift detection : prospect.buildSearchPayload ↔ orchestrator inline ────
+
+// Extract the body of fetchAdsViaTab from the file (between its `export async`
+// declaration and the next `export async function`). Used to assert the inline
+// payload structure doesn't drift from buildSearchPayload.
+function extractFetchAdsViaTabBody() {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(resolve(__dirname, '../orchestrator.js'), 'utf8');
+  const start = src.indexOf('export async function fetchAdsViaTab');
+  assert.ok(start > 0, 'fetchAdsViaTab declaration not found');
+  const tail = src.slice(start + 1);
+  const next = tail.indexOf('export async function');
+  return next > 0 ? tail.slice(0, next) : tail;
+}
+
+test('drift: orchestrator inline payload contains every key from buildSearchPayload', () => {
+  const expected = buildSearchPayload({
+    keyword: 'x', offset: 100, ownerType: 'pro', shippable: true,
+    priceMin: 10, priceMax: 90, departments: ['75'], adTypes: ['demand']
+  });
+  const body = extractFetchAdsViaTabBody();
+  for (const key of Object.keys(expected)) {
+    assert.ok(body.includes(key), `inline orchestrator payload missing key "${key}"`);
+  }
+  // listing_source toggle
+  assert.ok(body.includes("'direct-search'"), 'inline missing listing_source direct-search');
+  assert.ok(body.includes("'pagination'"), 'inline missing listing_source pagination');
+});
+
+test('drift: orchestrator inline conditional fields mirror buildSearchPayload flags', () => {
+  const body = extractFetchAdsViaTabBody();
+  assert.ok(/extra\.shippableOnly/.test(body), 'shippable not propagated');
+  assert.ok(/extra\.ownerType\s*&&\s*extra\.ownerType\s*!==\s*'all'/.test(body), 'ownerType not gated by != all');
+  assert.ok(/extra\.priceMin/.test(body), 'priceMin not propagated');
+  assert.ok(/extra\.priceMax/.test(body), 'priceMax not propagated');
+  assert.ok(/extra\.departments/.test(body), 'departments not propagated');
 });
