@@ -146,17 +146,72 @@ export function ageDays(iso, now = new Date()) {
 }
 
 /**
- * Build the JSON body sent to /finder/search for one keyword + offset.
- * Pure helper, exported for testing.
+ * Build the JSON body sent to /finder/search.
+ *
+ * Server-side filters (owner_type, shippable, ranges.price, location.departments)
+ * shrink the response set instead of paying for full pages then filtering client-side.
+ * `listing_source` and `disable_total` / `extend` / `limit_alu` mirror the official
+ * web client and reduce DataDome flagging.
+ *
+ * @param {object} opts
+ * @param {string} opts.keyword
+ * @param {number} [opts.offset=0]
+ * @param {number} [opts.limit=100]
+ * @param {string[]} [opts.adTypes=['demand']]      one of: ['demand'], ['offer'], ['demand','offer']
+ * @param {'all'|'pro'|'private'} [opts.ownerType]  pushed as top-level owner_type (omitted if 'all')
+ * @param {boolean} [opts.shippable]                pushed as filters.location.shippable
+ * @param {number|null} [opts.priceMin]
+ * @param {number|null} [opts.priceMax]
+ * @param {string[]} [opts.departments]             dept IDs (e.g. ['75','92'])
  */
-export function buildSearchPayload({ keyword, offset = 0, limit = 100 }) {
-  return {
-    sort_by: 'time', sort_order: 'desc', limit, offset,
-    filters: {
-      enums: { ad_type: ['demand'] },
-      keywords: { text: keyword }
-    }
+export function buildSearchPayload({
+  keyword,
+  offset = 0,
+  limit = 100,
+  adTypes = ['demand'],
+  ownerType = 'all',
+  shippable = false,
+  priceMin = null,
+  priceMax = null,
+  departments = []
+} = {}) {
+  const filters = {
+    enums: { ad_type: adTypes },
+    keywords: { text: keyword }
   };
+
+  if (priceMin != null || priceMax != null) {
+    const price = {};
+    if (priceMin != null) price.min = Number(priceMin);
+    if (priceMax != null) price.max = Number(priceMax);
+    filters.ranges = { price };
+  }
+
+  if (Array.isArray(departments) && departments.length) {
+    filters.location = { departments };
+  }
+
+  if (shippable) {
+    filters.location = { ...(filters.location || {}), shippable: true };
+  }
+
+  const payload = {
+    sort_by: 'time',
+    sort_order: 'desc',
+    limit,
+    limit_alu: 0,
+    offset,
+    disable_total: true,
+    extend: true,
+    listing_source: offset === 0 ? 'direct-search' : 'pagination',
+    filters
+  };
+
+  if (ownerType && ownerType !== 'all') {
+    payload.owner_type = ownerType;
+  }
+
+  return payload;
 }
 
 /**
@@ -228,6 +283,90 @@ export function buildEntry(ad, { score, kw, isNew }) {
     owner_name: ad.owner?.name || '',
     owner_type: ad.owner?.type || ''
   };
+}
+
+/**
+ * Attach a subset of normalizeUserCard() output onto a prospect entry.
+ *
+ * Selected fields support 3 use cases:
+ *  - reply.rate / inMinutes → score modulation (réactif vs fantôme)
+ *  - presence.status / lastActivity → filter on recently-active sellers
+ *  - feedback.score / receivedCount → trust signal
+ *  - badges → identity_verified, etc.
+ *  - totalAds → activity baseline
+ *
+ * Pure & defensive : returns a new entry, never mutates ; null userCard is OK.
+ *
+ * @param {object} entry      from buildEntry()
+ * @param {object|null} card  from my-ads.normalizeUserCard()
+ */
+export function mergeUserCardIntoEntry(entry, card) {
+  if (!card) return entry;
+  return {
+    ...entry,
+    user_reply_rate: card.reply?.rate ?? null,
+    user_reply_minutes: card.reply?.inMinutes ?? null,
+    user_presence_status: card.presence?.status ?? null,
+    user_last_activity: card.presence?.lastActivity ?? null,
+    user_feedback_score: card.feedback?.score ?? null,
+    user_feedback_count: card.feedback?.receivedCount ?? 0,
+    user_total_ads: card.totalAds ?? null,
+    user_registered_at: card.registeredAt ?? null,
+    user_is_pro: !!card.isPro,
+    user_badges: Array.isArray(card.badges)
+      ? card.badges.map(b => b.type).filter(Boolean)
+      : []
+  };
+}
+
+/**
+ * Enrich a list of entries by fetching user-cards in parallel-bounded batches.
+ *
+ * Cache shape (passed in & out) :
+ *   { [userId]: { card: <normalized>, at: <ms epoch> } }
+ *
+ * Skips entries with no owner_id, dedupes by userId, respects TTL.
+ * `fetchCard(userId)` returns the normalized card or null on any failure
+ * (caller decides whether 403/404 should bubble — this helper just skips).
+ *
+ * @param {object} opts
+ * @param {object[]} opts.entries
+ * @param {(uid: string) => Promise<object|null>} opts.fetchCard
+ * @param {object} [opts.cache={}]   in/out
+ * @param {number} [opts.ttlMs=86400000]  24h
+ * @param {number} [opts.concurrency=3]
+ * @returns {Promise<{entries: object[], cache: object}>}
+ */
+export async function enrichProspectsWithUserCard({
+  entries,
+  fetchCard,
+  cache = {},
+  ttlMs = 86400_000,
+  concurrency = 3
+}) {
+  if (!Array.isArray(entries) || !entries.length) return { entries: entries || [], cache };
+  const now = Date.now();
+  const uniqueIds = [...new Set(entries.map(e => e.owner_id).filter(Boolean))];
+  const toFetch = uniqueIds.filter(uid => {
+    const c = cache[uid];
+    return !c || (now - (c.at || 0)) > ttlMs;
+  });
+
+  for (let i = 0; i < toFetch.length; i += concurrency) {
+    const batch = toFetch.slice(i, i + concurrency);
+    const results = await Promise.all(batch.map(uid =>
+      fetchCard(uid).catch(() => null)
+    ));
+    batch.forEach((uid, idx) => {
+      if (results[idx]) cache[uid] = { card: results[idx], at: now };
+    });
+  }
+
+  const enriched = entries.map(e => {
+    const card = cache[e.owner_id]?.card;
+    return card ? mergeUserCardIntoEntry(e, card) : e;
+  });
+  return { entries: enriched, cache };
 }
 
 /**

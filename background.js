@@ -8,8 +8,9 @@ self.addEventListener('unhandledrejection', (e) => {
   if (POPUP_GONE_RE.test(text)) e.preventDefault();
 });
 
-import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm, fetchInboxViaTab, fetchMyAdsViaApi } from './orchestrator.js';
-import { processRawAds, markResultsSeen, DEFAULT_KEYWORDS } from './prospect.js';
+import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm, fetchInboxViaTab, fetchMyAdsViaApi, fetchUserCardViaTab } from './orchestrator.js';
+import { processRawAds, markResultsSeen, DEFAULT_KEYWORDS, enrichProspectsWithUserCard } from './prospect.js';
+import { normalizeUserCard } from './my-ads.js';
 import { classifyConversations } from './messaging.js';
 
 const BUMP_ALARM = 'lbc-weekly-bump';
@@ -165,6 +166,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           console.warn('[lbc-bumper] dashboard API failed, falling back to DOM scrape:', apiErr.message);
           out = await listUserAds();
         }
+        if (out?.datadomeBlocked) await notifyDatadomeBlock('dashboard');
         await chrome.storage.local.set({ myListings: out });
         respond({ ok: true, result: out });
       } else if (msg.type === 'GET_BUMP_STATUS') {
@@ -188,7 +190,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         respond({ ok: true });
       } else if (msg.type === 'INBOX_REFRESH') {
         try {
-          const { conversations, at } = await fetchInboxViaTab();
+          const { conversations, at, datadomeBlocked } = await fetchInboxViaTab();
+          if (datadomeBlocked) await notifyDatadomeBlock('inbox');
           const classified = classifyConversations(conversations);
           await chrome.storage.local.set({
             inboxCache: classified,
@@ -239,15 +242,17 @@ async function doProspectScan(trigger) {
   const apiFilters = {
     priceMin: profile.priceMin,
     priceMax: profile.priceMax,
-    departments: profile.departments || []
+    departments: profile.departments || [],
+    ownerType: profile.ownerType || 'all',
+    shippableOnly: !!profile.shippableOnly
   };
   // Fetch routed through a leboncoin tab — direct SW fetch is 403'd by DataDome.
   // Errors here usually mean : (a) tab couldn't load (network), (b) DataDome
   // captcha not solved (rare), (c) leboncoin API rate-limited. All recoverable
   // on next manual scan — but we must surface the failure to the user.
-  let adsByKeyword, contactedAdIds;
+  let adsByKeyword, contactedAdIds, datadomeBlocked = false;
   try {
-    ({ adsByKeyword, contactedAdIds = [] } = await fetchAdsViaTab(keywords, maxAgeDays, adType, apiFilters));
+    ({ adsByKeyword, contactedAdIds = [], datadomeBlocked = false } = await fetchAdsViaTab(keywords, maxAgeDays, adType, apiFilters));
   } catch (err) {
     await chrome.storage.local.set({
       prospectLastRunByProfile: {
@@ -261,6 +266,9 @@ async function doProspectScan(trigger) {
     });
     throw err;
   }
+  if (datadomeBlocked) {
+    await notifyDatadomeBlock('prospect-scan');
+  }
   const allContacted = new Set([...contactedAdIds, ...prospectContactedLocal]);
   const out = processRawAds({
     adsByKeyword, maxAgeDays, minScore,
@@ -270,6 +278,12 @@ async function doProspectScan(trigger) {
     shippableOnly: !!profile.shippableOnly,
     sortOrder: profile.sortOrder || 'score'
   });
+  // Opt-in : enrichir top-N résultats avec /api/user-card. Coûteux (N tabs ouvertes
+  // séquentiellement) — limité à enrichTopN entrées pour éviter DataDome thrash.
+  if (profile.enrichUserCard) {
+    const topN = Math.max(1, Math.min(20, profile.enrichTopN || 10));
+    out.results = await enrichTopResults(out.results, topN);
+  }
   await chrome.storage.local.set({
     prospectResultsByProfile: { ...prospectResultsByProfile, [profile.id]: out.results },
     prospectLastRunByProfile: {
@@ -280,6 +294,28 @@ async function doProspectScan(trigger) {
   const ignored = new Set(prospectIgnoredIdsByProfile[profile.id] || []);
   await maybeNotify(out.results, seen, prospectGlobalSettings, profile, ignored);
   return out;
+}
+
+// Persisted cache lives in chrome.storage.local.userCardCache. Loaded once,
+// passed in/out of enrichProspectsWithUserCard, saved back after.
+async function enrichTopResults(results, topN) {
+  if (!results?.length) return results;
+  const top = results.slice(0, topN);
+  const rest = results.slice(topN);
+  const { userCardCache = {} } = await chrome.storage.local.get('userCardCache');
+
+  const fetchCard = async (userId) => {
+    const res = await fetchUserCardViaTab(userId);
+    if (res?.datadomeBlocked) { await notifyDatadomeBlock('user-card'); return null; }
+    if (res?.notFound || res?.error || !res?.userData) return null;
+    return normalizeUserCard(res.userData, res.proData);
+  };
+
+  const { entries: enrichedTop, cache: newCache } = await enrichProspectsWithUserCard({
+    entries: top, fetchCard, cache: userCardCache
+  });
+  await chrome.storage.local.set({ userCardCache: newCache });
+  return [...enrichedTop, ...rest];
 }
 
 async function profileCreate(name) {
@@ -334,6 +370,30 @@ async function profileDelete(id) {
     prospectSeenIdsByProfile: strip(prospectSeenIdsByProfile),
     prospectIgnoredIdsByProfile: strip(prospectIgnoredIdsByProfile),
     prospectLastRunByProfile: strip(prospectLastRunByProfile)
+  });
+}
+
+// Surface DataDome captcha hits to the user — silent breaks left them
+// wondering why scans returned 0 results. Stored so the popup can show a
+// dismissable banner; notification fires at most once per hour.
+async function notifyDatadomeBlock(source) {
+  const now = Date.now();
+  const { datadomeBlock } = await chrome.storage.local.get('datadomeBlock');
+  await chrome.storage.local.set({
+    datadomeBlock: { at: new Date(now).toISOString(), source }
+  });
+  const lastNotifAt = datadomeBlock?.notifiedAt ? new Date(datadomeBlock.notifiedAt).getTime() : 0;
+  if (now - lastNotifAt < 3600_000) return;
+  await chrome.storage.local.set({
+    datadomeBlock: { at: new Date(now).toISOString(), source, notifiedAt: new Date(now).toISOString() }
+  });
+  await chrome.notifications.create(`lbc-datadome-${now}`, {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
+    title: '⚠️ Leboncoin a bloqué la requête',
+    message: 'DataDome a refusé une requête API. Va sur leboncoin.fr et résous le captcha, puis relance le scan.',
+    contextMessage: 'Leboncoin Bumper',
+    priority: 2
   });
 }
 
