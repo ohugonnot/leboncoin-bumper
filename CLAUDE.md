@@ -24,5 +24,11 @@
 
 ## Tests
 - `npm test` = Node test runner, 220+ tests purs (pas de fetch réseau).
-- `npx playwright test --config tests/e2e/playwright.config.js` = 33 e2e via serveur statique local sur `http://localhost:7331`, mock `chrome.*` injecté avant chargement modules.
+- `npx playwright test --config tests/e2e/playwright.config.js` = 33+ e2e via serveur statique local sur `http://localhost:7331`, mock `chrome.*` injecté avant chargement modules. `tests/e2e/extension.spec.js` charge l'extension MV3 réelle (`--headless=new` + `launchPersistentContext`) — catch les violations CSP.
 - Fetch réseau jamais testé en e2e (DataDome) — couvert par normalizers purs.
+
+## Tests live LBC (session connectée)
+- Profil Playwright persistant **déjà connecté à LBC** : `~/.config/playwright-mcp-leboncoin/` — utilisé par les outils `mcp__playwright__browser_*`. Ne pas en créer un nouveau, réutiliser celui-ci. Cookies LBC + JWT survivent entre sessions.
+- WSLg dispo (`DISPLAY=:0`, `WAYLAND_DISPLAY=wayland-0`) → on peut lancer Chromium headed visible côté utilisateur.
+- Chromium Playwright binaires dans `~/.cache/ms-playwright/chromium-*/chrome-linux64/chrome` (prendre la version la plus récente).
+- L'utilisateur ne souhaite **jamais** d'action destructive auto en test live : pas de submit du wizard de dépôt, pas de click sur Supprimer. S'arrêter avant l'action finale.
