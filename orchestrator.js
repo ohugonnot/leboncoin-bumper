@@ -226,6 +226,7 @@ export async function fetchMyAdsViaApi() {
         const limit = 100;
         let total = null;
 
+        let datadomeBlocked = false;
         do {
           const body = JSON.stringify({
             context: 'default',
@@ -237,7 +238,23 @@ export async function fetchMyAdsViaApi() {
             include_inactive: true,
             include_draft: true
           });
-          const res = await fetch(apiUrl, { method: 'POST', headers, body });
+          // Retry+timeout pattern, mirror of fetchAdsViaTab.
+          let res, attempt = 0;
+          const backoffs = [400, 1200];
+          while (true) {
+            const ac = new AbortController();
+            const tid = setTimeout(() => ac.abort(), 15000);
+            try {
+              res = await fetch(apiUrl, { method: 'POST', headers, body, signal: ac.signal });
+              if (res.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
+            } catch (e) {
+              clearTimeout(tid);
+              if (attempt >= backoffs.length) throw e;
+            }
+            clearTimeout(tid);
+            await new Promise(r => setTimeout(r, backoffs[attempt++]));
+          }
+          if (res.status === 403) { datadomeBlocked = true; break; }
           if (!res.ok) throw new Error(`dashboard API returned ${res.status}`);
           const data = await res.json();
           if (total === null) total = data.total ?? 0;
@@ -248,11 +265,16 @@ export async function fetchMyAdsViaApi() {
 
         // Pseudo from the owner name on the first ad (consistent across ads).
         const pseudo = allAds[0]?.owner?.name ?? null;
-        return { rawAds: allAds, pseudo };
+        return { rawAds: allAds, pseudo, datadomeBlocked };
       }
     });
     const listings = (result.rawAds || []).map(normalizeAd);
-    return { listings, pseudo: result.pseudo ?? null, fetchedAt: new Date().toISOString() };
+    return {
+      listings,
+      pseudo: result.pseudo ?? null,
+      fetchedAt: new Date().toISOString(),
+      datadomeBlocked: !!result.datadomeBlocked
+    };
   } finally {
     await chrome.tabs.remove(tab.id).catch(() => {});
   }
@@ -327,6 +349,7 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
         } catch { /* non-fatal — just won't tag */ }
 
         const adsByKeyword = {};
+        let datadomeBlocked = false;
         for (let i = 0; i < kws.length; i++) {
           const kw = kws[i];
           const items = [];
@@ -345,7 +368,9 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
             });
             let data;
             try {
-              // Build dynamic filters from per-profile config
+              // Build dynamic filters from per-profile config. Mirror of
+              // prospect.buildSearchPayload — kept inline because executeScript
+              // serializes this function and cannot reference outer modules.
               const filters = { enums: { ad_type: adTypesEnum }, keywords: { text: kw } };
               if (extra.priceMin != null || extra.priceMax != null) {
                 const price = {};
@@ -356,17 +381,54 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
               if (Array.isArray(extra.departments) && extra.departments.length) {
                 filters.location = { departments: extra.departments };
               }
-              const res = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'content-type': 'application/json', 'api_key': API_KEY },
-                credentials: 'include',
-                body: JSON.stringify({
-                  // Always time-desc : pagination bails on age cutoff. Display
-                  // sort is applied post-fetch in sortEntries().
-                  sort_by: 'time', sort_order: 'desc',
-                  limit: 100, offset, filters
-                })
-              });
+              if (extra.shippableOnly) {
+                filters.location = { ...(filters.location || {}), shippable: true };
+              }
+              const body = {
+                // Always time-desc : pagination bails on age cutoff. Display
+                // sort is applied post-fetch in sortEntries().
+                sort_by: 'time', sort_order: 'desc',
+                limit: 100, limit_alu: 0, offset,
+                disable_total: true, extend: true,
+                listing_source: offset === 0 ? 'direct-search' : 'pagination',
+                filters
+              };
+              if (extra.ownerType && extra.ownerType !== 'all') {
+                body.owner_type = extra.ownerType;
+              }
+              // Retry on 5xx / network errors / timeout. DataDome 403 and 4xx
+              // are permanent — no point retrying. Backoff: 400ms then 1200ms.
+              // Timeout per attempt: 15s (AbortController). Without this,
+              // hung connections would block the whole keyword loop.
+              let res, attempt = 0;
+              const backoffs = [400, 1200];
+              while (true) {
+                const ac = new AbortController();
+                const tid = setTimeout(() => ac.abort(), 15000);
+                try {
+                  res = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json', 'api_key': API_KEY },
+                    credentials: 'include',
+                    body: JSON.stringify(body),
+                    signal: ac.signal
+                  });
+                  if (res.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
+                } catch {
+                  if (attempt >= backoffs.length) { res = null; clearTimeout(tid); break; }
+                }
+                clearTimeout(tid);
+                await new Promise(r => setTimeout(r, backoffs[attempt++]));
+              }
+              if (!res) break;
+              // 403 = DataDome captcha. The tab itself has bypassed it once
+              // (page loaded OK) but a fetch later in the session can still
+              // be challenged. Surface this — silent breaks left users
+              // wondering why scans returned 0 results.
+              if (res.status === 403) {
+                datadomeBlocked = true;
+                break;
+              }
               if (!res.ok) break;
               data = await res.json();
             } catch { break; }
@@ -380,9 +442,10 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
             await new Promise(r => setTimeout(r, 250));
           }
           adsByKeyword[kw] = items;
+          if (datadomeBlocked) break;
         }
         await chrome.storage.local.remove('prospectScanProgress');
-        return { adsByKeyword, contactedAdIds };
+        return { adsByKeyword, contactedAdIds, datadomeBlocked };
       }
     });
     return result;
@@ -424,9 +487,26 @@ export async function fetchInboxViaTab() {
         let nextUrl = `${BASE}/messaging/proxy/api/v1/hal/${userId}/conversations?presenceStatus=true`;
         const allConversations = [];
         let pages = 0;
+        let datadomeBlocked = false;
 
         while (nextUrl && pages < MAX_PAGES) {
-          const r = await fetch(nextUrl, { headers, credentials: 'include' });
+          // Retry+timeout, mirror of fetchAdsViaTab.
+          let r, attempt = 0;
+          const backoffs = [400, 1200];
+          while (true) {
+            const ac = new AbortController();
+            const tid = setTimeout(() => ac.abort(), 15000);
+            try {
+              r = await fetch(nextUrl, { headers, credentials: 'include', signal: ac.signal });
+              if (r.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
+            } catch (e) {
+              clearTimeout(tid);
+              if (attempt >= backoffs.length) throw e;
+            }
+            clearTimeout(tid);
+            await new Promise(res => setTimeout(res, backoffs[attempt++]));
+          }
+          if (r.status === 403) { datadomeBlocked = true; break; }
           if (!r.ok) throw new Error(`Inbox API returned ${r.status}`);
           const d = await r.json();
           allConversations.push(...(d?._embedded?.conversations || []));
@@ -439,10 +519,123 @@ export async function fetchInboxViaTab() {
           if (pages < MAX_PAGES) await new Promise(r => setTimeout(r, 250));
         }
 
-        return allConversations;
+        return { conversations: allConversations, datadomeBlocked };
       }
     });
-    return { conversations: result || [], at: Date.now() };
+    return {
+      conversations: result?.conversations || [],
+      at: Date.now(),
+      datadomeBlocked: !!result?.datadomeBlocked
+    };
+  } finally {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+/**
+ * GET /api/adfinder/v1/classified/{id} via an LBC tab. Returns the raw JSON
+ * (caller normalises via my-ads.normalizeClassifiedAd) or a sentinel:
+ *  - `{ raw }`              ok
+ *  - `{ datadomeBlocked }`  403
+ *  - `{ notFound }`         404/410 (ad deleted)
+ *  - `{ error: string }`    other transport/parse failures
+ */
+export async function fetchAdDetailViaTab(adId) {
+  if (!adId) throw new Error('missing adId');
+  const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
+  try {
+    await waitForTabLoad(tab.id);
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      args: [String(adId)],
+      func: async (id) => {
+        const url = `https://api.leboncoin.fr/api/adfinder/v1/classified/${id}`;
+        let r, attempt = 0;
+        const backoffs = [400, 1200];
+        while (true) {
+          const ac = new AbortController();
+          const tid = setTimeout(() => ac.abort(), 15000);
+          try {
+            r = await fetch(url, { credentials: 'include', signal: ac.signal });
+            if (r.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
+          } catch (e) {
+            clearTimeout(tid);
+            if (attempt >= backoffs.length) return { error: String(e?.message || e) };
+          }
+          clearTimeout(tid);
+          await new Promise(res => setTimeout(res, backoffs[attempt++]));
+        }
+        if (r.status === 403) return { datadomeBlocked: true };
+        if (r.status === 404 || r.status === 410) return { notFound: true };
+        if (!r.ok) return { error: `HTTP ${r.status}` };
+        try {
+          return { raw: await r.json() };
+        } catch (e) {
+          return { error: String(e?.message || e) };
+        }
+      }
+    });
+    return result || { error: 'no result' };
+  } finally {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+/**
+ * GET /api/user-card/v2/{userId}/infos via an LBC tab. If `account_type === 'pro'`,
+ * chain `/api/onlinestores/v2/users/{userId}?fields=all` (404 tolerated — some pros
+ * lack a public storefront).
+ *
+ * Returns `{ userData, proData }` (raw, normalise via my-ads.normalizeUserCard)
+ * or sentinel : `{ datadomeBlocked }`, `{ notFound }`, `{ error }`.
+ */
+export async function fetchUserCardViaTab(userId) {
+  if (!userId) throw new Error('missing userId');
+  const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
+  try {
+    await waitForTabLoad(tab.id);
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      args: [String(userId)],
+      func: async (uid) => {
+        const fetchOnce = async (url) => {
+          let r, attempt = 0;
+          const backoffs = [400, 1200];
+          while (true) {
+            const ac = new AbortController();
+            const tid = setTimeout(() => ac.abort(), 15000);
+            try {
+              r = await fetch(url, { credentials: 'include', signal: ac.signal });
+              if (r.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
+            } catch (e) {
+              clearTimeout(tid);
+              if (attempt >= backoffs.length) return { error: String(e?.message || e) };
+            }
+            clearTimeout(tid);
+            await new Promise(res => setTimeout(res, backoffs[attempt++]));
+          }
+          if (r.status === 403) return { datadomeBlocked: true };
+          if (r.status === 404 || r.status === 410) return { notFound: true };
+          if (!r.ok) return { error: `HTTP ${r.status}` };
+          try { return { raw: await r.json() }; }
+          catch (e) { return { error: String(e?.message || e) }; }
+        };
+
+        const userRes = await fetchOnce(`https://api.leboncoin.fr/api/user-card/v2/${uid}/infos`);
+        if (userRes.datadomeBlocked || userRes.notFound || userRes.error) return userRes;
+        const userData = userRes.raw;
+
+        // Storefront only exists for pros, and not all pros have a public page.
+        let proData = null;
+        if (userData?.account_type === 'pro') {
+          const proRes = await fetchOnce(`https://api.leboncoin.fr/api/onlinestores/v2/users/${uid}?fields=all`);
+          if (proRes.datadomeBlocked) return proRes; // surface to caller
+          if (!proRes.notFound && !proRes.error) proData = proRes.raw ?? null;
+        }
+        return { userData, proData };
+      }
+    });
+    return result || { error: 'no result' };
   } finally {
     await chrome.tabs.remove(tab.id).catch(() => {});
   }
@@ -478,28 +671,48 @@ export async function openReplyForm(adId, message) {
   return tab.id;
 }
 
+// Was: navigate to /annonce/{id}/editer then DOM-scrape the form.
+// Now: single GET to /api/adfinder/v1/classified/{id}. Same shape returned,
+// but avoids the full page load + breaks if LBC redesigns /editer DOM.
 async function scrapeEditPage(tabId, adId) {
-  await navigate(tabId, `${LBC}/annonce/${adId}/editer`);
-  await waitForSelector(tabId, 'input[name="subject"]');
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId },
-    func: () => {
-      const get = (sel) => document.querySelector(sel)?.value || '';
+    args: [String(adId)],
+    func: async (id) => {
+      const url = `https://api.leboncoin.fr/api/adfinder/v1/classified/${id}`;
+      let r, attempt = 0;
+      const backoffs = [400, 1200];
+      while (true) {
+        const ac = new AbortController();
+        const tid = setTimeout(() => ac.abort(), 15000);
+        try {
+          r = await fetch(url, { credentials: 'include', signal: ac.signal });
+          if (r.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
+        } catch (e) {
+          clearTimeout(tid);
+          if (attempt >= backoffs.length) return { error: String(e?.message || e) };
+        }
+        clearTimeout(tid);
+        await new Promise(res => setTimeout(res, backoffs[attempt++]));
+      }
+      if (r.status === 403) return { error: 'datadome blocked' };
+      if (r.status === 404 || r.status === 410) return { error: 'ad not found (deleted)' };
+      if (!r.ok) return { error: `HTTP ${r.status}` };
+      let raw;
+      try { raw = await r.json(); }
+      catch (e) { return { error: String(e?.message || e) }; }
       return {
-        subject: get('input[name="subject"]'),
-        body: document.querySelector('textarea[name="body"]')?.value || '',
-        price: get('input[name="price"]'),
-        location: get('input[name="location"]'),
-        phoneHidden: document.querySelector('input[name="phone_hidden"]')?.checked || false,
-        photos: [...new Set(
-          [...document.querySelectorAll('img')]
-            .map(i => i.src)
-            .filter(s => s.includes('img.leboncoin.fr/api/v1/lbcpb1'))
-            .map(s => s.replace(/\?rule=[^&]+/, '?rule=ad-large'))
-        )]
+        subject: raw.subject || '',
+        body: raw.body || '',
+        price: raw.price_cents != null ? String(raw.price_cents / 100) : '',
+        // Repost wizard's location autocomplete expects "City zipcode".
+        location: `${raw.location?.city || ''} ${raw.location?.zipcode || ''}`.trim(),
+        phoneHidden: !raw.has_phone,
+        photos: Array.isArray(raw.images?.urls_large) ? raw.images.urls_large : []
       };
     }
   });
+  if (result?.error) throw new Error(`fetch ad ${adId} failed: ${result.error}`);
   return { adId, ...result };
 }
 
@@ -839,8 +1052,8 @@ async function repostListing(tabId, data) {
 
   // ── Étape 6 : Location ────────────────────────────────────────────────────
   // LBC bloque silencieusement si on ne clique pas une suggestion de l'autocomplete.
-  // scrapeEditPage renvoie "Lyon (69002)" (format affiché par LBC) mais l'autocomplete
-  // matche mieux "Lyon 69002" (sans parenthèses) — on normalise avant de taper.
+  // `data.location` est "Lyon 69002" (city+zipcode via API classified). On enlève
+  // d'éventuelles parens héritées d'anciens caches DOM-scrapés avant de taper.
   await waitForSelector(tabId, 'input[name="location"]', 10000);
   const normalizedLocation = (data.location || '').replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
   await log(`    [wizard] step 6: location "${data.location}" → "${normalizedLocation}"`);

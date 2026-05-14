@@ -116,3 +116,145 @@ export function normalizeAd(rawAd) {
     }
   };
 }
+
+/**
+ * Normalize one raw ad from /api/adfinder/v1/classified/{id} — the public
+ * single-ad endpoint. Differs from the dashboard payload:
+ *  - price exposed as `price_cents` (integer cents), not array
+ *  - photos in `images.urls_large`, not `images.urls`
+ *  - `counters.favorites` replaces `stats.Favorites`
+ *  - includes `has_phone`, `expiration_date`, `attributes[]`
+ *
+ * Used to replace DOM-scraping the /editer page for backup/duplicate flows.
+ */
+export function normalizeClassifiedAd(rawAd) {
+  const urlMatch = (rawAd.url || '').match(/\/ad\/([^/]+)\/(\d+)/);
+  const catSlug = urlMatch?.[1] ?? null;
+  const idFromUrl = urlMatch?.[2] ?? null;
+  const id = String(rawAd.list_id ?? idFromUrl ?? '');
+  const price = rawAd.price_cents != null ? rawAd.price_cents / 100 : null;
+
+  return {
+    id,
+    catSlug,
+    title: rawAd.subject ?? null,
+    description: rawAd.body ?? null,
+    price,
+    categoryId: rawAd.category_id ?? null,
+    categoryName: rawAd.category_name ?? null,
+    photos: rawAd.images?.urls_large ?? [],
+    attributes: Array.isArray(rawAd.attributes) ? rawAd.attributes : [],
+    location: rawAd.location
+      ? {
+          city:    rawAd.location.city    ?? null,
+          zipcode: rawAd.location.zipcode ?? null,
+          dept:    rawAd.location.department_id ?? null,
+          lat:     rawAd.location.lat     ?? null,
+          lng:     rawAd.location.lng     ?? null
+        }
+      : null,
+    owner: rawAd.owner
+      ? { userId: rawAd.owner.user_id ?? null, type: rawAd.owner.type ?? null, name: rawAd.owner.name ?? null }
+      : null,
+    publishedAt: rawAd.first_publication_date ?? null,
+    expiresAt: rawAd.expiration_date ?? null,
+    status: rawAd.status ?? null,
+    adType: rawAd.ad_type ?? null,
+    hasPhone: !!rawAd.has_phone,
+    favorites: rawAd.counters?.favorites ?? 0,
+    url: rawAd.url ?? (catSlug && id ? `https://www.leboncoin.fr/ad/${catSlug}/${id}` : null)
+  };
+}
+
+/**
+ * Normalize the response from /api/user-card/v2/{userId}/infos (+ optional
+ * /api/onlinestores/v2/users/{userId}?fields=all for pro accounts).
+ *
+ * Fields surfaced are tuned for prospect-enrichment use cases:
+ *  - replyRate / replyInMinutes : how reactive is this seller
+ *  - presence.lastActivity      : recently online?
+ *  - feedback.score             : trust signal (0-5)
+ *  - accountType (pro|private)  : filter target
+ *  - totalAds                   : activity level
+ *
+ * @param {object} userData  raw /user-card/v2 body
+ * @param {object|null} proData  raw /onlinestores/v2 body (null for private)
+ */
+export function normalizeUserCard(userData, proData = null) {
+  const fb = userData?.feedback ?? {};
+  const cs = fb.category_scores ?? {};
+  const reply = userData?.reply ?? {};
+  const presence = userData?.presence ?? {};
+  const badges = Array.isArray(userData?.badges) ? userData.badges : [];
+
+  // overall_score is 0-1 in the API ; *5 mirrors lbc lib's exposed range.
+  const feedbackScore = fb.overall_score != null ? fb.overall_score * 5 : null;
+
+  const out = {
+    id: userData?.user_id ?? null,
+    name: userData?.name ?? null,
+    registeredAt: userData?.registered_at ?? null,
+    location: userData?.location ?? null,
+    accountType: userData?.account_type ?? null,
+    totalAds: userData?.total_ads ?? 0,
+    description: userData?.description ?? null,
+    profilePicture: userData?.profile_picture?.extra_large_url ?? null,
+    feedback: {
+      score: feedbackScore,
+      receivedCount: fb.received_count ?? 0,
+      categoryScores: {
+        cleanness:     cs.CLEANNESS     ?? null,
+        communication: cs.COMMUNICATION ?? null,
+        conformity:    cs.CONFORMITY    ?? null,
+        package:       cs.PACKAGE       ?? null,
+        product:       cs.PRODUCT       ?? null,
+        recommendation: cs.RECOMMENDATION ?? null,
+        respect:       cs.RESPECT       ?? null,
+        transaction:   cs.TRANSACTION   ?? null,
+        userAttention: cs.USER_ATTENTION ?? null
+      }
+    },
+    reply: {
+      rate:       reply.rate           ?? null,
+      rateText:   reply.rate_text      ?? null,
+      inMinutes:  reply.in_minutes     ?? null,
+      timeText:   reply.reply_time_text ?? null
+    },
+    presence: {
+      status:       presence.status        ?? null,
+      text:         presence.presence_text ?? null,
+      lastActivity: presence.last_activity ?? null,
+      enabled:      !!presence.enabled
+    },
+    badges: badges.map(b => ({ type: b.type ?? null, name: b.name ?? null })),
+    isPro: userData?.account_type === 'pro',
+    pro: null
+  };
+
+  if (proData) {
+    const owner = proData.owner ?? {};
+    const brand = proData.brand ?? {};
+    const info  = proData.information ?? {};
+    const rating = proData.rating ?? {};
+    out.pro = {
+      onlineStoreId:   proData.online_store_id   ?? null,
+      onlineStoreName: proData.online_store_name ?? null,
+      activitySector:  owner.activitySector     ?? null,
+      siren:           owner.siren              ?? null,
+      siret:           owner.siret              ?? null,
+      activeSince:     owner.activeSince        ?? null,
+      logo:            brand.logo?.large        ?? null,
+      cover:           brand.cover?.large       ?? null,
+      slogan:          brand.slogan             ?? null,
+      description:     info.description         ?? null,
+      openingHours:    info.opening_hours       ?? null,
+      websiteUrl:      info.website_url         ?? null,
+      rating: {
+        value: rating.rating_value       ?? null,
+        total: rating.user_ratings_total ?? 0
+      }
+    };
+  }
+
+  return out;
+}
