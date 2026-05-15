@@ -517,6 +517,72 @@ export async function markResultsSeen(results, profileId) {
   });
 }
 
+/**
+ * Filter results down to those eligible for a notification.
+ * Pure function — usable in tests without any storage access.
+ *
+ * @param {object[]} results
+ * @param {Set<string>} seenIds    - user-acknowledged IDs (managed by markResultsSeen)
+ * @param {Set<string>} notifiedIds - already-notified IDs (managed by markResultsNotified)
+ * @param {Set<string>} ignoredIds
+ * @param {number} minScore
+ * @returns {object[]}
+ */
+export function filterFreshForNotification(results, seenIds, notifiedIds, ignoredIds, minScore) {
+  return results.filter(r =>
+    !seenIds.has(r.list_id) &&
+    !notifiedIds.has(r.list_id) &&
+    !ignoredIds.has(r.list_id) &&
+    r.score >= minScore
+  );
+}
+
+/**
+ * Build the webhook POST payload. Pure function — safe for tests.
+ * Deliberately excludes JWT, api_key, score_breakdown, prospectContactedLocal.
+ */
+export function buildWebhookPayload(profile, trigger, fresh) {
+  return {
+    profile: { id: profile.id, name: profile.name },
+    trigger,
+    ts: new Date().toISOString(),
+    fresh: fresh.map(r => ({
+      list_id: r.list_id,
+      subject: r.subject,
+      url: r.url,
+      score: r.score,
+      location: r.location || null,
+      kw_hit: r.kw_hit || null,
+      age_days: r.age_days ?? null,
+      price: r.price ?? null,
+      owner_name: r.owner_name || null
+    }))
+  };
+}
+
+/**
+ * Persist the IDs that triggered a Chrome notification for a given profile.
+ * Stored as { [list_id]: ms_epoch } for TTL-based purge.
+ * Only safe to call from extension contexts (popup / service worker).
+ */
+export async function markResultsNotified(listIds, profileId) {
+  const { prospectNotifiedIdsByProfile = {} } = await chrome.storage.local.get('prospectNotifiedIdsByProfile');
+  const now = Date.now();
+  const ttl7d = 7 * 24 * 3600 * 1000;
+  const existing = prospectNotifiedIdsByProfile[profileId] || {};
+  // Purge entries older than 7 days inline to avoid unbounded growth.
+  for (const id in existing) {
+    if (now - existing[id] > ttl7d) delete existing[id];
+  }
+  for (const id of listIds) existing[id] = now;
+  await chrome.storage.local.set({
+    prospectNotifiedIdsByProfile: {
+      ...prospectNotifiedIdsByProfile,
+      [profileId]: existing
+    }
+  });
+}
+
 export const DEFAULT_REPLY_TEMPLATE = (
   "Bonjour,\n\n" +
   "Je suis Odilon, développeur full-stack basé à Besançon (PHP/Symfony, JS/TS, Go), 10+ ans d'expérience.\n" +

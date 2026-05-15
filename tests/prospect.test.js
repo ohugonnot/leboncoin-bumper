@@ -8,6 +8,7 @@ import {
   sortEntries, runProspectScan, formatReplyTemplate,
   parseProfileKeywords, explainScore, groupByOwner, searchKeyword,
   mergeUserCardIntoEntry, enrichProspectsWithUserCard,
+  filterFreshForNotification, buildWebhookPayload, markResultsNotified,
   STRONG_SIGNALS, MODERATE_SIGNALS, NEG_SIGNALS, DEMAND_PREFIX, DEMAND_HINTS
 } from '../prospect.js';
 import {
@@ -669,4 +670,117 @@ test('drift: fetchUserCardViaTab utilise les 4 endpoints web (sans api_key)', ()
   assert.ok(!/['"]api_key['"]\s*:/.test(body), 'api_key utilisé comme header — casse le CORS preflight');
   // Pattern Promise.all pour parallel
   assert.ok(/Promise\.all\s*\(\[/.test(body), 'endpoints pas appelés en parallèle');
+});
+
+// ─── filterFreshForNotification ───────────────────────────────────────────────
+
+test('filterFreshForNotification: already-notified result is excluded', () => {
+  const results = [
+    { list_id: 'a1', score: 8 },
+    { list_id: 'a2', score: 9 },
+    { list_id: 'a3', score: 7 }
+  ];
+  const seen = new Set();
+  const notified = new Set(['a1']);
+  const ignored = new Set();
+  const fresh = filterFreshForNotification(results, seen, notified, ignored, 5);
+  assert.deepEqual(fresh.map(r => r.list_id), ['a2', 'a3']);
+});
+
+test('filterFreshForNotification: score below minScore is excluded', () => {
+  const results = [{ list_id: 'b1', score: 4 }, { list_id: 'b2', score: 8 }];
+  const fresh = filterFreshForNotification(results, new Set(), new Set(), new Set(), 7);
+  assert.deepEqual(fresh.map(r => r.list_id), ['b2']);
+});
+
+test('filterFreshForNotification: seen and ignored also excluded', () => {
+  const results = [
+    { list_id: 'c1', score: 8 },
+    { list_id: 'c2', score: 8 },
+    { list_id: 'c3', score: 8 }
+  ];
+  const fresh = filterFreshForNotification(results, new Set(['c1']), new Set(), new Set(['c2']), 5);
+  assert.deepEqual(fresh.map(r => r.list_id), ['c3']);
+});
+
+// ─── markResultsNotified (purge 7j) ──────────────────────────────────────────
+
+test('markResultsNotified: purges entries older than 7 days and adds new ones', async () => {
+  const profileId = 'test-profile';
+  const now = Date.now();
+  const eightDaysAgo = now - 8 * 24 * 3600 * 1000;
+  const threeDaysAgo = now - 3 * 24 * 3600 * 1000;
+
+  // Minimal chrome.storage.local mock
+  let stored = {
+    prospectNotifiedIdsByProfile: {
+      [profileId]: {
+        old_ad: eightDaysAgo,
+        recent_ad: threeDaysAgo
+      }
+    }
+  };
+  const origChrome = globalThis.chrome;
+  globalThis.chrome = {
+    storage: {
+      local: {
+        get: async (key) => {
+          if (typeof key === 'string') return { [key]: stored[key] };
+          const out = {};
+          for (const k of key) out[k] = stored[k];
+          return out;
+        },
+        set: async (data) => { Object.assign(stored, data); }
+      }
+    }
+  };
+
+  try {
+    await markResultsNotified(['new_ad'], profileId);
+    const map = stored.prospectNotifiedIdsByProfile[profileId];
+    assert.ok(!('old_ad' in map), 'entry older than 7 days should be purged');
+    assert.ok('recent_ad' in map, 'entry within 7 days should be kept');
+    assert.ok('new_ad' in map, 'newly notified id should be present');
+  } finally {
+    globalThis.chrome = origChrome;
+  }
+});
+
+// ─── buildWebhookPayload ──────────────────────────────────────────────────────
+
+test('buildWebhookPayload: produces correct shape and excludes sensitive fields', () => {
+  const profile = { id: 'p-abc', name: 'Veille test' };
+  const trigger = 'alarm';
+  const fresh = [{
+    list_id: 'x1', subject: 'Dev PHP', url: 'https://lbc.fr/x1', score: 9,
+    location: 'Paris', kw_hit: 'php', age_days: 2, price: 500,
+    owner_name: 'Bob',
+    // Fields that must NOT appear in the payload
+    score_breakdown: { title: 5, body: 3 },
+    prospectContactedLocal: true,
+    jwt: 'super-secret-token'
+  }];
+
+  const payload = buildWebhookPayload(profile, trigger, fresh);
+
+  assert.deepEqual(payload.profile, { id: 'p-abc', name: 'Veille test' });
+  assert.equal(payload.trigger, 'alarm');
+  assert.ok(typeof payload.ts === 'string', 'ts should be an ISO string');
+  assert.equal(payload.fresh.length, 1);
+
+  const r = payload.fresh[0];
+  assert.equal(r.list_id, 'x1');
+  assert.equal(r.subject, 'Dev PHP');
+  assert.equal(r.url, 'https://lbc.fr/x1');
+  assert.equal(r.score, 9);
+  assert.equal(r.location, 'Paris');
+  assert.equal(r.kw_hit, 'php');
+  assert.equal(r.age_days, 2);
+  assert.equal(r.price, 500);
+  assert.equal(r.owner_name, 'Bob');
+
+  // Sensitive / verbose fields must be absent
+  assert.ok(!('score_breakdown' in r), 'score_breakdown must not be in payload');
+  assert.ok(!('prospectContactedLocal' in r), 'prospectContactedLocal must not be in payload');
+  assert.ok(!('jwt' in r), 'jwt must not be in payload');
 });
