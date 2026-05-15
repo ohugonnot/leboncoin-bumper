@@ -160,6 +160,7 @@ const HTML_IDS = [
   'p-priceMin', 'p-priceMax', 'p-departments',
   'p-sortBy', 'p-ownerType', 'p-shippableOnly',
   'p-notifyOnNew', 'p-notifyMinScore',
+  'p-notificationWebhookUrl', 'p-webhook-status',
   'p-keywords', 'p-replyTemplate',
   'p-scan', 'p-mark-seen',
   'p-stat-new', 'p-stat-total', 'p-last-run',
@@ -221,6 +222,9 @@ export function installDOMStub() {
   for (const id of textareaIds) {
     elMap[id] = createElement('textarea', id);
   }
+
+  elMap['p-notificationWebhookUrl'] = createElement('input', 'p-notificationWebhookUrl');
+  elMap['p-notificationWebhookUrl'].type = 'url';
 
   const body = new StubBody();
   body._elMap = elMap;

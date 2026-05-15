@@ -9,9 +9,10 @@ self.addEventListener('unhandledrejection', (e) => {
 });
 
 import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm, fetchInboxViaTab, fetchMyAdsViaApi, fetchUserCardViaTab } from './orchestrator.js';
-import { processRawAds, markResultsSeen, DEFAULT_KEYWORDS, enrichProspectsWithUserCard } from './prospect.js';
+import { processRawAds, markResultsSeen, markResultsNotified, filterFreshForNotification, buildWebhookPayload, DEFAULT_KEYWORDS, enrichProspectsWithUserCard } from './prospect.js';
 import { normalizeUserCard } from './my-ads.js';
 import { classifyConversations } from './messaging.js';
+import { postNotificationWebhook } from './notify-webhook.js';
 
 const BUMP_ALARM = 'lbc-weekly-bump';
 const PROSPECT_ALARM = 'lbc-weekly-prospect';
@@ -220,14 +221,15 @@ async function doProspectScan(trigger) {
     prospectGlobalSettings = {},
     prospectSeenIdsByProfile = {},
     prospectIgnoredIdsByProfile = {},
+    prospectNotifiedIdsByProfile = {},
     prospectResultsByProfile = {},
     prospectLastRunByProfile = {},
     prospectContactedLocal = []
   } = await chrome.storage.local.get([
     'prospectProfiles', 'activeProfileId', 'prospectGlobalSettings',
     'prospectSeenIdsByProfile', 'prospectIgnoredIdsByProfile',
-    'prospectResultsByProfile', 'prospectLastRunByProfile',
-    'prospectContactedLocal'
+    'prospectNotifiedIdsByProfile', 'prospectResultsByProfile',
+    'prospectLastRunByProfile', 'prospectContactedLocal'
   ]);
   const profile = prospectProfiles.find(p => p.id === activeProfileId) || prospectProfiles[0];
   if (!profile) throw new Error('No prospect profile found');
@@ -292,7 +294,8 @@ async function doProspectScan(trigger) {
     }
   });
   const ignored = new Set(prospectIgnoredIdsByProfile[profile.id] || []);
-  await maybeNotify(out.results, seen, prospectGlobalSettings, profile, ignored);
+  const notified = new Set(Object.keys(prospectNotifiedIdsByProfile[profile.id] || {}));
+  await maybeNotify(out.results, seen, prospectGlobalSettings, profile, ignored, trigger, notified);
   return out;
 }
 
@@ -311,7 +314,8 @@ async function profileCreate(name) {
     sortOrder: 'score',  // 'score' | 'time' | 'price-asc' | 'price-desc' — display sort
     ownerType: 'all',    // 'all' | 'pro' | 'private'
     shippableOnly: false,
-    replyTemplate: ''
+    replyTemplate: '',
+    notificationWebhookUrl: null
   };
   await chrome.storage.local.set({
     prospectProfiles: [...prospectProfiles, profile],
@@ -405,11 +409,10 @@ async function enrichTopResults(results, topN) {
   return [...enrichedTop, ...rest];
 }
 
-async function maybeNotify(results, seenBefore, settings, profile, ignored = new Set()) {
+async function maybeNotify(results, seenBefore, settings, profile, ignored = new Set(), trigger = 'alarm', notifiedBefore = new Set()) {
   if (settings?.notifyOnNew === false) return;
   const minScore = settings?.notifyMinScore ?? 7;
-  // Don't notify on ads the user explicitly ignored.
-  const fresh = results.filter(r => !seenBefore.has(r.list_id) && !ignored.has(r.list_id) && r.score >= minScore);
+  const fresh = filterFreshForNotification(results, seenBefore, notifiedBefore, ignored, minScore);
   if (!fresh.length) return;
 
   const top = fresh[0];
@@ -436,6 +439,15 @@ async function maybeNotify(results, seenBefore, settings, profile, ignored = new
   if (pendingNotificationTarget.size > 50) {
     const firstKey = pendingNotificationTarget.keys().next().value;
     pendingNotificationTarget.delete(firstKey);
+  }
+
+  // Persist notified IDs so the next scan doesn't re-notify the same ads.
+  await markResultsNotified(fresh.map(r => r.list_id), profile.id);
+
+  if (profile?.notificationWebhookUrl) {
+    const payload = buildWebhookPayload(profile, trigger, fresh);
+    // Fire-and-forget : ne bloque pas la notif système.
+    postNotificationWebhook(profile.notificationWebhookUrl, payload, profile.id).catch(() => {});
   }
 }
 
