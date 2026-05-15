@@ -1,3 +1,5 @@
+import { buildEmailFromPayload } from './prospect.js';
+
 export async function postNotificationWebhook(url, payload, profileId) {
   // Accept http (local proxy) and https only.
   let parsed;
@@ -46,7 +48,6 @@ export async function postNotificationEmail(email, payload, profileId) {
     return;
   }
 
-  const { buildEmailFromPayload } = await import('./prospect.js');
   const { subject, body } = buildEmailFromPayload(payload);
 
   const ac = new AbortController();
