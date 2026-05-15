@@ -587,17 +587,107 @@ export async function fetchAdDetailViaTab(adId) {
   }
 }
 
-// fetchUserCardViaTab(userId) retiré le 2026-05-14 : /api/user-card/v2/{id}/infos
-// est un endpoint mobile-only. Validé en live → "Failed to fetch" systematique
-// depuis browser origin (DataDome rejette au niveau TLS, même avec api_key).
-// Pour ré-implémenter une fetch user-card cote web, agréger depuis :
-//   - /api/users/v1/users/{uid}/account-type
-//   - /api/adfinder/v2/owner_listing (ads du vendeur)
-//   - /api/followme/v1/followers-number/{uid}
-//   - /api/profile-picture/v1/users/{uid}/picture
-// La couche pure (my-ads.normalizeUserCard, prospect.mergeUserCardIntoEntry,
-// prospect.enrichProspectsWithUserCard) est conservée — elle reste utilisable
-// dès qu'un nouveau fetcher web-compatible sera branché dessus.
+/**
+ * Aggregate user-card data via the LBC web client endpoints (4 GET/POST in parallel).
+ *
+ * Replaces the previous mobile-only `/api/user-card/v2/{id}/infos` attempt.
+ * Validated live le 2026-05-15 sur compte test : les 4 endpoints répondent 200
+ * SANS aucun header custom (le header `api_key` cassait le CORS preflight et
+ * causait "Failed to fetch" — piège majeur).
+ *
+ * Renvoie `{ userData, proData: null }` (shape compatible avec
+ * my-ads.normalizeUserCard) ou sentinel global `{ datadomeBlocked }` si TOUS
+ * les fetches échouent en 403. Fail partiel = champs concernés laissés null.
+ */
+export async function fetchUserCardViaTab(userId) {
+  if (!userId) throw new Error('missing userId');
+  const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
+  try {
+    await waitForTabLoad(tab.id);
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      args: [String(userId)],
+      func: async (uid) => {
+        // PAS de header api_key — il casse CORS preflight sur ces endpoints.
+        const fetchOnce = async (url, init = {}) => {
+          let r, attempt = 0;
+          const backoffs = [400, 1200];
+          while (true) {
+            const ac = new AbortController();
+            const tid = setTimeout(() => ac.abort(), 15000);
+            try {
+              r = await fetch(url, { credentials: 'include', ...init, signal: ac.signal });
+              if (r.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
+            } catch (e) {
+              clearTimeout(tid);
+              if (attempt >= backoffs.length) return { error: String(e?.message || e) };
+            }
+            clearTimeout(tid);
+            await new Promise(res => setTimeout(res, backoffs[attempt++]));
+          }
+          if (r.status === 403) return { datadomeBlocked: true };
+          if (r.status === 404 || r.status === 410) return { notFound: true };
+          if (!r.ok) return { error: `HTTP ${r.status}` };
+          try { return { raw: await r.json() }; }
+          catch (e) { return { error: String(e?.message || e) }; }
+        };
+
+        const [acct, ownerList, followers, pic] = await Promise.all([
+          fetchOnce(`https://api.leboncoin.fr/api/users/v1/users/${uid}/account-type`),
+          fetchOnce(`https://api.leboncoin.fr/api/adfinder/v2/owner_listing`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ filters: { owner: { user_id: uid } }, limit: 1, offset: 0 })
+          }),
+          fetchOnce(`https://api.leboncoin.fr/api/followme/v1/followers-number/${uid}`),
+          fetchOnce(`https://api.leboncoin.fr/api/profile-picture/v1/users/${uid}/picture`)
+        ]);
+
+        const partial403 = [acct, ownerList, followers, pic].filter(s => s.datadomeBlocked).length;
+        // Tous bloqués → propagate au caller pour notif user.
+        if (partial403 === 4) return { datadomeBlocked: true };
+
+        const rawType = acct.raw?.accountType ?? null;
+        const accountType = rawType
+          ? (rawType.startsWith('pro') ? 'pro' : 'private')
+          : null;
+
+        // Web client n'expose pas feedback/reply/presence/badges/name/registered_at.
+        // Champs concernés laissés null — le normalizer est défensif.
+        const userData = {
+          user_id: uid,
+          name: null,
+          registered_at: null,
+          location: null,
+          account_type: accountType,
+          // `total` = toutes annonces, `total_active` (publiques) → web.adsActive.
+          // `?? null` (pas `?? 0`) pour distinguer "endpoint KO" de "vraiment 0".
+          total_ads: ownerList.raw?.total ?? null,
+          description: null,
+          profile_picture: pic.raw ? { extra_large_url: pic.raw.extra_large_url ?? pic.raw.large_url ?? null } : null,
+          feedback: null,
+          reply: null,
+          presence: null,
+          badges: [],
+          _web_extras: {
+            followers: followers.raw?.count ?? null,
+            raw_account_type: rawType,
+            ads_total: ownerList.raw?.total ?? null,
+            ads_active: ownerList.raw?.total_active ?? null,
+            picture_default: pic.raw?.default ?? null,
+            // Compteur 1-3 si certains endpoints bloqués (4 = sentinel global).
+            // Signal diagnostic — caller peut console.warn sans notif aggressive.
+            partial403
+          }
+        };
+        return { userData, proData: null };
+      }
+    });
+    return result || { error: 'no result' };
+  } finally {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
 
 /**
  * Open leboncoin's /reply/{adId} form pre-filled with `message` and bring the

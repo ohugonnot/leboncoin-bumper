@@ -484,6 +484,23 @@ test('mergeUserCardIntoEntry: null card → entry untouched', () => {
   assert.equal(e, baseEntry);
 });
 
+test('mergeUserCardIntoEntry: web extras (followers + profilePicture) propagés', () => {
+  const cardWeb = {
+    ...fullCard,
+    profilePicture: 'https://img/p.jpg',
+    web: { followers: 42, adsTotal: 12, adsActive: 10, pictureDefault: false }
+  };
+  const e = mergeUserCardIntoEntry(baseEntry, cardWeb);
+  assert.equal(e.user_followers, 42);
+  assert.equal(e.user_profile_picture, 'https://img/p.jpg');
+});
+
+test('mergeUserCardIntoEntry: web extras absents → user_followers/picture null', () => {
+  const e = mergeUserCardIntoEntry(baseEntry, fullCard);
+  assert.equal(e.user_followers, null);
+  assert.equal(e.user_profile_picture, null);
+});
+
 test('mergeUserCardIntoEntry: missing reply/presence/feedback → null fields, no throw', () => {
   const e = mergeUserCardIntoEntry(baseEntry, { id: 'u-1' });
   assert.equal(e.user_reply_rate, null);
@@ -559,6 +576,40 @@ test('enrichProspectsWithUserCard: entries with no owner_id are skipped', async 
   assert.equal(calls, 0);
 });
 
+test('enrichProspectsWithUserCard: fetchCard renvoie null (datadome / 404) → entry intact', async () => {
+  const fetchCard = async () => null;
+  const out = await enrichProspectsWithUserCard({
+    entries: [{ ...baseEntry, owner_id: 'u-1' }], fetchCard
+  });
+  assert.equal(out.entries[0].user_reply_rate, undefined);
+  assert.equal(out.entries[0].owner_id, 'u-1');
+});
+
+test('enrichProspectsWithUserCard: card partiel (champs null) ne throw pas et merge', async () => {
+  const partialCard = { id: 'u-1', isPro: false, totalAds: null, profilePicture: null };
+  const fetchCard = async () => partialCard;
+  const out = await enrichProspectsWithUserCard({
+    entries: [{ ...baseEntry, owner_id: 'u-1' }], fetchCard
+  });
+  assert.equal(out.entries[0].user_total_ads, null);
+  assert.equal(out.entries[0].user_reply_rate, null);
+  assert.equal(out.entries[0].user_is_pro, false);
+});
+
+test('enrichProspectsWithUserCard: purge des entrées expirées > 2*ttlMs', async () => {
+  const cache = {
+    'u-fresh': { card: fullCard, at: Date.now() },
+    'u-stale': { card: fullCard, at: Date.now() - 3 * 86400_000 }  // 3 jours
+  };
+  await enrichProspectsWithUserCard({
+    entries: [{ ...baseEntry, owner_id: 'u-fresh' }],
+    fetchCard: async () => fullCard,
+    cache, ttlMs: 86400_000
+  });
+  assert.ok(cache['u-fresh'], 'fresh kept');
+  assert.equal(cache['u-stale'], undefined, 'stale purged');
+});
+
 // ─── Drift detection : prospect.buildSearchPayload ↔ orchestrator inline ────
 
 // Extract the body of fetchAdsViaTab from the file (between its `export async`
@@ -595,4 +646,27 @@ test('drift: orchestrator inline conditional fields mirror buildSearchPayload fl
   assert.ok(/extra\.priceMin/.test(body), 'priceMin not propagated');
   assert.ok(/extra\.priceMax/.test(body), 'priceMax not propagated');
   assert.ok(/extra\.departments/.test(body), 'departments not propagated');
+});
+
+test('drift: fetchUserCardViaTab utilise les 4 endpoints web (sans api_key)', () => {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(resolve(__dirname, '../orchestrator.js'), 'utf8');
+  const start = src.indexOf('export async function fetchUserCardViaTab');
+  assert.ok(start > 0, 'fetchUserCardViaTab declaration not found');
+  const tail = src.slice(start);
+  const next = tail.indexOf('\nexport ', 1);
+  const body = next > 0 ? tail.slice(0, next) : tail;
+
+  // Les 4 paths web (pas /api/user-card/v2 qui est mobile-only)
+  assert.ok(body.includes('/api/users/v1/users/'), 'missing account-type endpoint');
+  assert.ok(body.includes('/api/adfinder/v2/owner_listing'), 'missing owner_listing endpoint');
+  assert.ok(body.includes('/api/followme/v1/followers-number/'), 'missing followers endpoint');
+  assert.ok(body.includes('/api/profile-picture/v1/users/'), 'missing picture endpoint');
+  // Body owner_listing : doit utiliser filters.owner.user_id (validé live)
+  assert.ok(/filters:\s*{\s*owner:\s*{\s*user_id/.test(body), 'owner_listing body shape incorrect');
+  // PAS de api_key en tant que header actif (casse le CORS preflight).
+  // Tolère les commentaires qui expliquent justement pourquoi.
+  assert.ok(!/['"]api_key['"]\s*:/.test(body), 'api_key utilisé comme header — casse le CORS preflight');
+  // Pattern Promise.all pour parallel
+  assert.ok(/Promise\.all\s*\(\[/.test(body), 'endpoints pas appelés en parallèle');
 });

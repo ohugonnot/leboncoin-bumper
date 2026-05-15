@@ -228,7 +228,15 @@ export function normalizeUserCard(userData, proData = null) {
     },
     badges: badges.map(b => ({ type: b.type ?? null, name: b.name ?? null })),
     isPro: userData?.account_type === 'pro',
-    pro: null
+    pro: null,
+    // Champs exposes uniquement par le path web-aggregated (fetchUserCardViaTab).
+    // null si la source venait d'un autre fetcher (futur mobile-via-curl ou rien).
+    web: userData?._web_extras ? {
+      followers: userData._web_extras.followers ?? null,
+      adsTotal: userData._web_extras.ads_total ?? null,
+      adsActive: userData._web_extras.ads_active ?? null,
+      pictureDefault: userData._web_extras.picture_default ?? null
+    } : null
   };
 
   if (proData) {
