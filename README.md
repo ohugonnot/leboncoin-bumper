@@ -68,6 +68,31 @@ Tout tourne dans ton navigateur. **Aucune donnée ne quitte ta machine.** Pas de
 - **Planning flexible** : chaque heure / chaque jour / chaque semaine, indépendant du bumper
 - **Enrichissement profil vendeur (opt-in)** : pour les top-N résultats, agrège 4 endpoints LBC (account type, nombre total d'annonces du vendeur, followers, photo de profil) pour t'aider à prioriser les prospects sérieux vs comptes test. Cache 24 h, dedup par vendeur, dégradation gracieuse si DataDome bloque. À activer dans le storage du profil via `enrichUserCard: true` (UI à venir).
 
+### Notifications par email
+
+Pour recevoir un mail à chaque nouveau prospect détecté :
+
+1. Onglet **Prospects** → ouvrir les paramètres de la veille
+2. Renseigner ton email dans le champ "📬 Recevoir les notifs → Email"
+3. **Au premier scan**, [Formsubmit](https://formsubmit.co) (le service intermédiaire, gratuit) t'envoie un mail de confirmation : clique le lien pour activer (politique anti-spam, une seule fois)
+4. Tu peux tester immédiatement avec le bouton "✉ Envoyer un mail de test"
+
+**Limites** : Formsubmit gratuit = 50 mails/jour par IP. Largement suffisant pour un usage personnel.
+
+**Power-user** : si tu as ton propre proxy (n8n, Cloudflare Worker, SMTP custom…), utilise plutôt le champ avancé "Webhook URL". Le payload JSON envoyé :
+```json
+{
+  "profile": { "id": "...", "name": "..." },
+  "trigger": "manual" | "alarm" | "test",
+  "ts": "2026-05-15T12:00:00.000Z",
+  "fresh": [
+    { "list_id", "subject", "url", "score", "location", "kw_hit", "age_days", "price", "owner_name" }
+  ]
+}
+```
+
+Le webhook prime sur l'email s'il est rempli.
+
 ## Captures d'écran
 
 <p align="center">

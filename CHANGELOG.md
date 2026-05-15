@@ -7,6 +7,8 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce
 ## [Unreleased]
 
 ### Ajouté
+- Notifications par email via Formsubmit (champ profil + bouton "Tester")
+- Webhook URL avancé pour proxy custom (n8n, Slack...) — prime sur l'email
 - Payload `/finder/search` enrichi : `listing_source`, `extend`, `disable_total`, `limit_alu` (mimétisme client web officiel).
 - Filtres serveur `owner_type` (pro/private/all) et `filters.location.shippable` poussés côté API au lieu d'être appliqués post-fetch.
 - Détection 403 DataDome explicite sur les trois chemins authentifiés (`/finder/search`, `/api/dashboard/v1/search`, `/messaging/proxy/...`) + stockage `datadomeBlock` + notification système (throttle 1 h).

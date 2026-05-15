@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { postNotificationWebhook } from '../notify-webhook.js';
+import { postNotificationWebhook, postNotificationEmail, _logEmailError } from '../notify-webhook.js';
 
 function installChromeStub() {
   const store = {};
@@ -87,6 +87,66 @@ test('postNotificationWebhook: AbortError log le message sans attendre 5s', asyn
       store.lastWebhookErrorByProfile?.p1?.error?.toLowerCase().includes('abort'),
       `attendu message contenant 'abort', reçu: ${store.lastWebhookErrorByProfile?.p1?.error}`
     );
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.fetch;
+  }
+});
+
+// ─── postNotificationEmail ───────────────────────────────────────────────────
+
+const EMAIL_PAYLOAD = {
+  profile: { id: 'p1', name: 'Test' },
+  trigger: 'manual',
+  ts: '2026-05-15T10:00:00.000Z',
+  fresh: [{ list_id: 'x1', subject: 'PHP cherché', url: 'https://lbc.fr/x1', score: 7, location: 'Lyon', kw_hit: 'php', age_days: 1, price: null, owner_name: null }]
+};
+
+test('postNotificationEmail: email invalide → erreur loguée, fetch jamais appelé', async () => {
+  const store = installChromeStub();
+  globalThis.fetch = async () => { throw new Error('fetch should not be called'); };
+  try {
+    await postNotificationEmail('not-an-email', EMAIL_PAYLOAD, 'p1');
+    assert.equal(store.lastEmailErrorByProfile?.p1?.error, 'invalid email');
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.fetch;
+  }
+});
+
+test('postNotificationEmail: HTTP non-ok → erreur HTTP {status}', async () => {
+  const store = installChromeStub();
+  let capturedUrl = null;
+  globalThis.fetch = async (url) => { capturedUrl = url; return { ok: false, status: 500 }; };
+  try {
+    await postNotificationEmail('user@example.com', EMAIL_PAYLOAD, 'p1');
+    assert.equal(store.lastEmailErrorByProfile?.p1?.error, 'HTTP 500');
+    assert.ok(capturedUrl?.includes('formsubmit.co/ajax'), `URL attendue formsubmit: ${capturedUrl}`);
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.fetch;
+  }
+});
+
+test('postNotificationEmail: succès {success:"true"} → lastEmailErrorByProfile effacé', async () => {
+  const store = installChromeStub();
+  store.lastEmailErrorByProfile = { p1: { at: '2026-01-01T00:00:00.000Z', error: 'old' } };
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ success: 'true' }) });
+  try {
+    await postNotificationEmail('user@example.com', EMAIL_PAYLOAD, 'p1');
+    assert.equal(store.lastEmailErrorByProfile?.p1, undefined);
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.fetch;
+  }
+});
+
+test('postNotificationEmail: succès HTTP mais {success:"false"} → erreur loguée', async () => {
+  const store = installChromeStub();
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ success: 'false', message: 'quota exceeded' }) });
+  try {
+    await postNotificationEmail('user@example.com', EMAIL_PAYLOAD, 'p1');
+    assert.ok(store.lastEmailErrorByProfile?.p1?.error, 'une erreur doit être loguée');
   } finally {
     delete globalThis.chrome;
     delete globalThis.fetch;

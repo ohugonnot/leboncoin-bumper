@@ -19,8 +19,12 @@ const p = {
   shippableOnly: document.getElementById('p-shippableOnly'),
   keywords: document.getElementById('p-keywords'),
   replyTemplate: document.getElementById('p-replyTemplate'),
+  notificationEmail: document.getElementById('p-notificationEmail'),
+  emailStatus: document.getElementById('p-email-status'),
+  testEmail: document.getElementById('p-test-email'),
   notificationWebhookUrl: document.getElementById('p-notificationWebhookUrl'),
   webhookStatus: document.getElementById('p-webhook-status'),
+  testWebhook: document.getElementById('p-test-webhook'),
   profileSelect: document.getElementById('p-profile-select'),
   profileAdd: document.getElementById('p-profile-add'),
   profileRename: document.getElementById('p-profile-rename'),
@@ -74,6 +78,7 @@ async function saveProspect() {
     ownerType: p.ownerType.value,
     shippableOnly: p.shippableOnly.checked,
     replyTemplate: p.replyTemplate.value,
+    notificationEmail: p.notificationEmail.value.trim() || null,
     notificationWebhookUrl: p.notificationWebhookUrl.value.trim() || null
   } : pr);
   const prospectGlobalSettings = {
@@ -98,7 +103,7 @@ export async function loadProspect() {
     'prospectProfiles', 'activeProfileId', 'prospectGlobalSettings',
     'prospectResultsByProfile', 'prospectLastRunByProfile',
     'prospectSeenIdsByProfile', 'prospectIgnoredIdsByProfile',
-    'prospectContactedLocal', 'lastWebhookErrorByProfile'
+    'prospectContactedLocal', 'lastWebhookErrorByProfile', 'lastEmailErrorByProfile'
   ]);
   const profiles = s.prospectProfiles || [];
   if (!profiles.length) return;  // migration not run yet
@@ -133,6 +138,13 @@ export async function loadProspect() {
   p.shippableOnly.checked = !!profile.shippableOnly;
   p.keywords.value = (profile.keywords || []).join('\n');
   p.replyTemplate.value = profile.replyTemplate || DEFAULT_REPLY_TEMPLATE;
+  p.notificationEmail.value = profile.notificationEmail || '';
+  const emailErr = (s.lastEmailErrorByProfile || {})[profile.id];
+  if (emailErr?.at && (Date.now() - new Date(emailErr.at).getTime() < 24 * 3600 * 1000)) {
+    p.emailStatus.textContent = `⚠ ${emailErr.error}`;
+  } else {
+    p.emailStatus.textContent = '';
+  }
   p.notificationWebhookUrl.value = profile.notificationWebhookUrl || '';
   const webhookErr = (s.lastWebhookErrorByProfile || {})[profile.id];
   if (webhookErr?.at && (Date.now() - new Date(webhookErr.at).getTime() < 24 * 3600 * 1000)) {
@@ -347,7 +359,7 @@ export function updateScanProgress(progress) {
 }
 
 export function initProspect() {
-  [p.enabled, p.frequency, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.adType, p.priceMin, p.priceMax, p.departments, p.sortBy, p.ownerType, p.shippableOnly, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate, p.notificationWebhookUrl].forEach(el => {
+  [p.enabled, p.frequency, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.adType, p.priceMin, p.priceMax, p.departments, p.sortBy, p.ownerType, p.shippableOnly, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate, p.notificationEmail, p.notificationWebhookUrl].forEach(el => {
     el.addEventListener('change', saveProspect);
     el.addEventListener('blur', saveProspect);
   });
@@ -401,4 +413,63 @@ export function initProspect() {
     await chrome.runtime.sendMessage({ type: 'MARK_PROSPECTS_SEEN', results });
     await loadProspect();
   });
+
+  p.testEmail && p.testEmail.addEventListener('click', () => onTestNotif('email'));
+  p.testWebhook && p.testWebhook.addEventListener('click', () => onTestNotif('webhook'));
+}
+
+async function onTestNotif(kind) {
+  const statusEl = kind === 'email' ? p.emailStatus : p.webhookStatus;
+  const btnEl = kind === 'email' ? p.testEmail : p.testWebhook;
+
+  // Guard: require the relevant field to be filled
+  const fieldVal = kind === 'email'
+    ? p.notificationEmail.value.trim()
+    : p.notificationWebhookUrl.value.trim();
+  if (!fieldVal) {
+    statusEl.textContent = `⚠ Renseigne d'abord ${kind === 'email' ? 'ton email' : 'l\'URL du webhook'}`;
+    return;
+  }
+
+  // Save first so the background picks up the latest value
+  await saveProspect();
+
+  // Throttle: disable button for 3 s to avoid spam
+  if (btnEl) btnEl.disabled = true;
+  statusEl.textContent = 'Envoi…';
+
+  const { prospectProfiles = [], activeProfileId } = await chrome.storage.local.get(['prospectProfiles', 'activeProfileId']);
+  const profile = prospectProfiles.find(pr => pr.id === activeProfileId) || prospectProfiles[0];
+
+  const testPayload = {
+    profile: { id: profile?.id || 'test', name: profile?.name || 'Test' },
+    trigger: 'test',
+    ts: new Date().toISOString(),
+    fresh: [{
+      list_id: 'test-0001',
+      subject: 'Test depuis Leboncoin Bumper',
+      url: 'https://www.leboncoin.fr/',
+      score: 9,
+      location: 'Paris',
+      kw_hit: 'test',
+      age_days: 0,
+      price: null,
+      owner_name: 'Bumper Test'
+    }]
+  };
+
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'TEST_NOTIF', kind, payload: testPayload });
+    if (res?.ok) {
+      statusEl.textContent = kind === 'email'
+        ? '✓ Mail envoyé — vérifie ta boîte (et tes spams)'
+        : '✓ Webhook appelé avec succès';
+    } else {
+      statusEl.textContent = `⚠ Échec : ${res?.error || 'erreur inconnue'}`;
+    }
+  } catch (e) {
+    statusEl.textContent = `⚠ Échec : ${e?.message || String(e)}`;
+  }
+
+  if (btnEl) setTimeout(() => { btnEl.disabled = false; }, 3000);
 }

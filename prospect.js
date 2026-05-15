@@ -561,6 +561,45 @@ export function buildWebhookPayload(profile, trigger, fresh) {
 }
 
 /**
+ * Build a plain-text email from a webhook payload for Formsubmit delivery.
+ * Pure function — no side effects, safe to test in Node.
+ */
+export function buildEmailFromPayload(payload) {
+  const n = payload.fresh.length;
+  const profileName = payload.profile?.name || '';
+  const noun = n === 1 ? 'nouveau prospect' : 'nouveaux prospects';
+  const subject = profileName
+    ? `🎯 ${n} ${noun} — ${profileName}`
+    : `🎯 ${n} ${noun}`;
+
+  const profileLine = profileName
+    ? `Profil : ${profileName} (id ${payload.profile.id})`
+    : `Profil : (id ${payload.profile.id})`;
+  const lines = [
+    profileLine,
+    `Déclenché : ${payload.trigger} · ${payload.ts}`,
+    '',
+    'Annonces :',
+    ''
+  ];
+
+  for (const r of payload.fresh) {
+    lines.push(`★ ${r.score} — ${r.subject}`);
+    const meta = [];
+    if (r.location) meta.push(`📍 ${r.location}`);
+    if (r.age_days != null) meta.push(`${r.age_days}j`);
+    if (r.price != null) meta.push(`${r.price}€`);
+    if (r.kw_hit) meta.push(`kw=${r.kw_hit}`);
+    if (meta.length) lines.push(`   ${meta.join(' · ')}`);
+    if (r.owner_name) lines.push(`   👤 ${r.owner_name}`);
+    if (r.url) lines.push(`   ${r.url}`);
+    lines.push('');
+  }
+
+  return { subject, body: lines.join('\n') };
+}
+
+/**
  * Persist the IDs that triggered a Chrome notification for a given profile.
  * Stored as { [list_id]: ms_epoch } for TTL-based purge.
  * Only safe to call from extension contexts (popup / service worker).
