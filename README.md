@@ -8,7 +8,7 @@
   <img src="docs/screenshots/prospect-hero.png" width="720" alt="Booster Leboncoin — onglet Prospects : veille multi-profil, scoring pondéré, ignore / contacter en un clic">
 </p>
 
-[![Tests](https://img.shields.io/badge/tests-189%20passing-success)](#tests)
+[![Tests](https://img.shields.io/badge/tests-231%20passing-success)](#tests)
 [![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 [![Manifest](https://img.shields.io/badge/Chrome-MV3-orange)](manifest.json)
 [![No tracking](https://img.shields.io/badge/données-100%25%20local-success)](#vie-privée)
@@ -66,6 +66,7 @@ Tout tourne dans ton navigateur. **Aucune donnée ne quitte ta machine.** Pas de
 - **Détection des conversations déjà entamées** via l'API messagerie Leboncoin — badge sur les annonces déjà contactées
 - **Notifications desktop** au-dessus d'un seuil de score configurable (1 = toute nouvelle annonce, 3+ = seulement les plus pertinentes)
 - **Planning flexible** : chaque heure / chaque jour / chaque semaine, indépendant du bumper
+- **Enrichissement profil vendeur (opt-in)** : pour les top-N résultats, agrège 4 endpoints LBC (account type, nombre total d'annonces du vendeur, followers, photo de profil) pour t'aider à prioriser les prospects sérieux vs comptes test. Cache 24 h, dedup par vendeur, dégradation gracieuse si DataDome bloque. À activer dans le storage du profil via `enrichUserCard: true` (UI à venir).
 
 ## Captures d'écran
 
