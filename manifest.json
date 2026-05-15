@@ -14,7 +14,11 @@
     "https://www.leboncoin.fr/*",
     "https://api.leboncoin.fr/*",
     "https://auth.leboncoin.fr/*",
-    "https://img.leboncoin.fr/*"
+    "https://img.leboncoin.fr/*",
+    "https://formsubmit.co/*"
+  ],
+  "optional_host_permissions": [
+    "*://*/*"
   ],
   "background": {
     "service_worker": "background.js",
