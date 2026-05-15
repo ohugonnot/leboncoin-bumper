@@ -19,6 +19,8 @@ const p = {
   shippableOnly: document.getElementById('p-shippableOnly'),
   keywords: document.getElementById('p-keywords'),
   replyTemplate: document.getElementById('p-replyTemplate'),
+  notificationWebhookUrl: document.getElementById('p-notificationWebhookUrl'),
+  webhookStatus: document.getElementById('p-webhook-status'),
   profileSelect: document.getElementById('p-profile-select'),
   profileAdd: document.getElementById('p-profile-add'),
   profileRename: document.getElementById('p-profile-rename'),
@@ -71,7 +73,8 @@ async function saveProspect() {
     sortOrder: p.sortBy.value,
     ownerType: p.ownerType.value,
     shippableOnly: p.shippableOnly.checked,
-    replyTemplate: p.replyTemplate.value
+    replyTemplate: p.replyTemplate.value,
+    notificationWebhookUrl: p.notificationWebhookUrl.value.trim() || null
   } : pr);
   const prospectGlobalSettings = {
     enabled: p.enabled.checked,
@@ -95,7 +98,7 @@ export async function loadProspect() {
     'prospectProfiles', 'activeProfileId', 'prospectGlobalSettings',
     'prospectResultsByProfile', 'prospectLastRunByProfile',
     'prospectSeenIdsByProfile', 'prospectIgnoredIdsByProfile',
-    'prospectContactedLocal'
+    'prospectContactedLocal', 'lastWebhookErrorByProfile'
   ]);
   const profiles = s.prospectProfiles || [];
   if (!profiles.length) return;  // migration not run yet
@@ -130,6 +133,13 @@ export async function loadProspect() {
   p.shippableOnly.checked = !!profile.shippableOnly;
   p.keywords.value = (profile.keywords || []).join('\n');
   p.replyTemplate.value = profile.replyTemplate || DEFAULT_REPLY_TEMPLATE;
+  p.notificationWebhookUrl.value = profile.notificationWebhookUrl || '';
+  const webhookErr = (s.lastWebhookErrorByProfile || {})[profile.id];
+  if (webhookErr?.at && (Date.now() - new Date(webhookErr.at).getTime() < 24 * 3600 * 1000)) {
+    p.webhookStatus.textContent = `⚠ ${webhookErr.error}`;
+  } else {
+    p.webhookStatus.textContent = '';
+  }
 
   const rawResults = s.prospectResultsByProfile?.[profile.id] || [];
   const localContacted = new Set(s.prospectContactedLocal || []);
@@ -337,7 +347,7 @@ export function updateScanProgress(progress) {
 }
 
 export function initProspect() {
-  [p.enabled, p.frequency, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.adType, p.priceMin, p.priceMax, p.departments, p.sortBy, p.ownerType, p.shippableOnly, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate].forEach(el => {
+  [p.enabled, p.frequency, p.dayOfWeek, p.hour, p.minScore, p.maxAgeDays, p.adType, p.priceMin, p.priceMax, p.departments, p.sortBy, p.ownerType, p.shippableOnly, p.keywords, p.notifyOnNew, p.notifyMinScore, p.replyTemplate, p.notificationWebhookUrl].forEach(el => {
     el.addEventListener('change', saveProspect);
     el.addEventListener('blur', saveProspect);
   });

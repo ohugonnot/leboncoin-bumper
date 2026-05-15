@@ -302,6 +302,12 @@
         <div class="field" title="Seuil de score pour déclencher une notif. 1 = toute nouvelle annonce. 3+ = seulement celles qui mat plusieurs de tes keywords."><label>Notif si score ≥</label><input type="number" id="p-notifyMinScore" min="1" max="20"></div>
       </div>
 
+      <div class="field" style="margin-top:10px;" title="URL POST appelée à chaque nouvelle notif prospect. Le service derrière convertit en email/Slack/etc. Laisser vide = désactivé.">
+        <label>Webhook URL <span class="muted">(optionnel)</span></label>
+        <input type="url" id="p-notificationWebhookUrl" placeholder="https://exemple.com/notif">
+        <p class="section-hint" id="p-webhook-status" style="margin-top:4px;"></p>
+      </div>
+
       <div class="field" style="margin-top: 10px;">
         <label>Mots-clés <span class="muted">(un par ligne, syntaxe avancée : <code>recalbox:3</code> pour poids 3)</span></label>
         <textarea id="p-keywords" rows="6" style="resize: vertical; min-height: 90px;" placeholder="wordpress&#10;prestashop&#10;recalbox:3&#10;…"></textarea>
