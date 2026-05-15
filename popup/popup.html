@@ -15,14 +15,21 @@
     </div>
   </header>
 
-  <!-- Login warning : visible uniquement quand pas connecté -->
+  <!-- Login warning : visible uniquement quand pas connecté ou détection en cours -->
   <div class="banner warning" id="login-banner" hidden>
-    <span class="banner-icon">⚠️</span>
+    <span class="banner-icon" id="login-banner-icon">⚠️</span>
     <div class="banner-content">
-      <strong>Pas connecté à leboncoin</strong>
-      <p>Connecte-toi à leboncoin.fr d'abord — l'extension a besoin d'une session active.</p>
+      <strong id="login-banner-title">Connexion leboncoin requise</strong>
+      <p id="login-banner-msg">
+        L'extension a besoin d'une session active sur leboncoin.fr.
+        Si tu es déjà connecté, clique "Vérifier ma connexion" pour qu'elle te détecte.
+        Sinon, va sur leboncoin et connecte-toi, puis reviens ici.
+      </p>
     </div>
-    <a class="btn primary small" href="https://www.leboncoin.fr/" target="_blank" rel="noopener">Se connecter</a>
+    <div class="banner-actions" id="login-banner-actions">
+      <button class="btn primary small" id="login-check-btn">🔍 Vérifier ma connexion</button>
+      <a class="btn ghost small" href="https://www.leboncoin.fr/" target="_blank" rel="noopener">↗ Aller sur leboncoin</a>
+    </div>
   </div>
 
   <nav class="tabs" role="tablist">
