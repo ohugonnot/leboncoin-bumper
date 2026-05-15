@@ -135,6 +135,7 @@ class StubBody extends StubElement {
 const HTML_IDS = [
   // header
   'login-dot', 'open-in-tab', 'login-banner',
+  'login-banner-icon', 'login-banner-title', 'login-banner-msg', 'login-banner-actions', 'login-check-btn',
   // bumper panel
   'panel-bumper',
   'b-help', 'b-selection-bar', 'b-select-all', 'b-select-none', 'b-selection-hint',
