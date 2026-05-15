@@ -104,6 +104,8 @@ describe('DOM IDs — cohérence HTML ↔ JS', () => {
       'p-scan-limits-hint',
       // Tab buttons — referenced via aria-labelledby on tabpanel sections, not getElementById
       'tab-bumper', 'tab-messages', 'tab-prospect',
+      // Notif channels: aria-describedby targets + details panel, referenced by aria not JS
+      'p-email-hint', 'p-webhook-hint', 'webhook-advanced',
     ];
     const unexpected = unused.filter(id => !knownUnused.includes(id));
     // Fail si de nouveaux orphelins apparaissent (régression HTML)

@@ -39,3 +39,46 @@ export async function _logWebhookError(profileId, error) {
   lastWebhookErrorByProfile[profileId] = { at: new Date().toISOString(), error };
   await chrome.storage.local.set({ lastWebhookErrorByProfile });
 }
+
+export async function postNotificationEmail(email, payload, profileId) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    await _logEmailError(profileId, 'invalid email');
+    return;
+  }
+
+  const { buildEmailFromPayload } = await import('./prospect.js');
+  const { subject, body } = buildEmailFromPayload(payload);
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 5000);
+  try {
+    const res = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(email)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, _subject: subject, _template: 'table', message: body }),
+      signal: ac.signal
+    });
+    clearTimeout(timer);
+    if (!res.ok) {
+      await _logEmailError(profileId, `HTTP ${res.status}`);
+      return;
+    }
+    const json = await res.json();
+    if (json?.success === 'true') {
+      const { lastEmailErrorByProfile = {} } = await chrome.storage.local.get('lastEmailErrorByProfile');
+      delete lastEmailErrorByProfile[profileId];
+      await chrome.storage.local.set({ lastEmailErrorByProfile });
+    } else {
+      await _logEmailError(profileId, json?.message || 'formsubmit error');
+    }
+  } catch (e) {
+    clearTimeout(timer);
+    await _logEmailError(profileId, e?.message || String(e));
+  }
+}
+
+export async function _logEmailError(profileId, error) {
+  const { lastEmailErrorByProfile = {} } = await chrome.storage.local.get('lastEmailErrorByProfile');
+  lastEmailErrorByProfile[profileId] = { at: new Date().toISOString(), error };
+  await chrome.storage.local.set({ lastEmailErrorByProfile });
+}

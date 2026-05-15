@@ -12,7 +12,7 @@ import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm,
 import { processRawAds, markResultsSeen, markResultsNotified, filterFreshForNotification, buildWebhookPayload, DEFAULT_KEYWORDS, enrichProspectsWithUserCard } from './prospect.js';
 import { normalizeUserCard } from './my-ads.js';
 import { classifyConversations } from './messaging.js';
-import { postNotificationWebhook } from './notify-webhook.js';
+import { postNotificationWebhook, postNotificationEmail } from './notify-webhook.js';
 
 const BUMP_ALARM = 'lbc-weekly-bump';
 const PROSPECT_ALARM = 'lbc-weekly-prospect';
@@ -189,6 +189,34 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       } else if (msg.type === 'PROFILE_DELETE') {
         await profileDelete(msg.id);
         respond({ ok: true });
+      } else if (msg.type === 'TEST_NOTIF') {
+        const { prospectProfiles = [], activeProfileId } = await chrome.storage.local.get(['prospectProfiles', 'activeProfileId']);
+        const profile = prospectProfiles.find(p => p.id === activeProfileId) || prospectProfiles[0];
+        if (!profile) { respond({ ok: false, error: 'no active profile' }); return; }
+        if (msg.kind === 'webhook') {
+          const url = profile.notificationWebhookUrl;
+          if (!url) { respond({ ok: false, error: 'webhook URL vide' }); return; }
+          await postNotificationWebhook(url, msg.payload, profile.id);
+          const { lastWebhookErrorByProfile = {} } = await chrome.storage.local.get('lastWebhookErrorByProfile');
+          const err = lastWebhookErrorByProfile[profile.id];
+          // Only treat as failure if the error was recorded during this call (within 5s)
+          if (err?.at && (Date.now() - new Date(err.at).getTime() < 6000)) {
+            respond({ ok: false, error: err.error });
+          } else {
+            respond({ ok: true });
+          }
+        } else {
+          const email = profile.notificationEmail;
+          if (!email) { respond({ ok: false, error: 'email vide' }); return; }
+          await postNotificationEmail(email, msg.payload, profile.id);
+          const { lastEmailErrorByProfile = {} } = await chrome.storage.local.get('lastEmailErrorByProfile');
+          const err = lastEmailErrorByProfile[profile.id];
+          if (err?.at && (Date.now() - new Date(err.at).getTime() < 6000)) {
+            respond({ ok: false, error: err.error });
+          } else {
+            respond({ ok: true });
+          }
+        }
       } else if (msg.type === 'INBOX_REFRESH') {
         try {
           const { conversations, at, datadomeBlocked } = await fetchInboxViaTab();
@@ -315,7 +343,8 @@ async function profileCreate(name) {
     ownerType: 'all',    // 'all' | 'pro' | 'private'
     shippableOnly: false,
     replyTemplate: '',
-    notificationWebhookUrl: null
+    notificationWebhookUrl: null,
+    notificationEmail: null
   };
   await chrome.storage.local.set({
     prospectProfiles: [...prospectProfiles, profile],
@@ -444,10 +473,12 @@ async function maybeNotify(results, seenBefore, settings, profile, ignored = new
   // Persist notified IDs so the next scan doesn't re-notify the same ads.
   await markResultsNotified(fresh.map(r => r.list_id), profile.id);
 
+  const payload = buildWebhookPayload(profile, trigger, fresh);
   if (profile?.notificationWebhookUrl) {
-    const payload = buildWebhookPayload(profile, trigger, fresh);
     // Fire-and-forget : ne bloque pas la notif système.
     postNotificationWebhook(profile.notificationWebhookUrl, payload, profile.id).catch(() => {});
+  } else if (profile?.notificationEmail) {
+    postNotificationEmail(profile.notificationEmail, payload, profile.id).catch(() => {});
   }
 }
 

@@ -9,6 +9,7 @@ import {
   parseProfileKeywords, explainScore, groupByOwner, searchKeyword,
   mergeUserCardIntoEntry, enrichProspectsWithUserCard,
   filterFreshForNotification, buildWebhookPayload, markResultsNotified,
+  buildEmailFromPayload,
   STRONG_SIGNALS, MODERATE_SIGNALS, NEG_SIGNALS, DEMAND_PREFIX, DEMAND_HINTS
 } from '../prospect.js';
 import {
@@ -783,4 +784,58 @@ test('buildWebhookPayload: produces correct shape and excludes sensitive fields'
   assert.ok(!('score_breakdown' in r), 'score_breakdown must not be in payload');
   assert.ok(!('prospectContactedLocal' in r), 'prospectContactedLocal must not be in payload');
   assert.ok(!('jwt' in r), 'jwt must not be in payload');
+});
+
+// ─── buildEmailFromPayload ───────────────────────────────────────────────────
+
+test('buildEmailFromPayload: 1 prospect → subject singulier, body contient score + url + location', () => {
+  const payload = {
+    profile: { id: 'p1', name: 'Veille test' },
+    trigger: 'alarm',
+    ts: '2026-05-15T10:00:00.000Z',
+    fresh: [{
+      list_id: 'x1', subject: 'Dev PHP cherché', url: 'https://lbc.fr/x1',
+      score: 8, location: 'Paris', kw_hit: 'php', age_days: 2, price: 500,
+      owner_name: 'Alice'
+    }]
+  };
+  const { subject, body } = buildEmailFromPayload(payload);
+  assert.ok(subject.includes('1 nouveau prospect'), `subject: ${subject}`);
+  assert.ok(subject.includes('Veille test'), `subject doit contenir le profil: ${subject}`);
+  assert.ok(body.includes('★ 8'), `body doit contenir le score: ${body}`);
+  assert.ok(body.includes('Dev PHP cherché'), `body doit contenir le subject: ${body}`);
+  assert.ok(body.includes('https://lbc.fr/x1'), `body doit contenir l'url: ${body}`);
+  assert.ok(body.includes('Paris'), `body doit contenir la location: ${body}`);
+});
+
+test('buildEmailFromPayload: 3 prospects → subject pluriel, body multi-bloc', () => {
+  const mk = (i) => ({
+    list_id: `id${i}`, subject: `Annonce ${i}`, url: `https://lbc.fr/${i}`,
+    score: i, location: null, kw_hit: null, age_days: null, price: null, owner_name: null
+  });
+  const payload = {
+    profile: { id: 'p2', name: '' },
+    trigger: 'manual',
+    ts: '2026-05-15T10:00:00.000Z',
+    fresh: [mk(1), mk(2), mk(3)]
+  };
+  const { subject, body } = buildEmailFromPayload(payload);
+  assert.ok(subject.includes('3 nouveaux prospects'), `subject: ${subject}`);
+  assert.ok(body.includes('Annonce 1') && body.includes('Annonce 2') && body.includes('Annonce 3'));
+});
+
+test('buildEmailFromPayload: champs null → body sans "null" ni "undefined"', () => {
+  const payload = {
+    profile: { id: 'p3', name: 'Veille sans data' },
+    trigger: 'manual',
+    ts: '2026-05-15T10:00:00.000Z',
+    fresh: [{
+      list_id: 'n1', subject: 'Sans détails', url: 'https://lbc.fr/n1',
+      score: 3, location: null, kw_hit: null, age_days: null, price: null, owner_name: null
+    }]
+  };
+  const { body } = buildEmailFromPayload(payload);
+  // Vérifie qu'aucun champ null/undefined ne s'affiche littéralement
+  assert.ok(!/\bnull\b/.test(body), `body ne doit pas contenir "null": ${body}`);
+  assert.ok(!/\bundefined\b/.test(body), `body ne doit pas contenir "undefined": ${body}`);
 });
