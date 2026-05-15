@@ -345,3 +345,37 @@ test('normalizeUserCard: pro null when not pro', () => {
   const u = normalizeUserCard(rawUser, null);
   assert.equal(u.pro, null);
 });
+
+// ─── normalizeUserCard web-partial (fetchUserCardViaTab aggregated shape) ───
+
+test('normalizeUserCard: web extras exposés via _web_extras', () => {
+  const webShape = {
+    user_id: 'u-x',
+    account_type: 'private',
+    total_ads: 12,
+    profile_picture: { extra_large_url: 'https://x/p.jpg' },
+    feedback: null, reply: null, presence: null, badges: [],
+    name: null, registered_at: null, location: null, description: null,
+    _web_extras: {
+      followers: 42,
+      ads_total: 12,
+      ads_active: 10,
+      picture_default: false,
+      raw_account_type: 'private-individual'
+    }
+  };
+  const u = normalizeUserCard(webShape, null);
+  assert.equal(u.web.followers, 42);
+  assert.equal(u.web.adsTotal, 12);
+  assert.equal(u.web.adsActive, 10);
+  assert.equal(u.web.pictureDefault, false);
+  // sans feedback/reply/presence → tout null mais pas de throw
+  assert.equal(u.feedback.score, null);
+  assert.equal(u.reply.rate, null);
+  assert.equal(u.presence.status, null);
+});
+
+test('normalizeUserCard: web bloc null quand _web_extras absent', () => {
+  const u = normalizeUserCard(rawUser, null);
+  assert.equal(u.web, null);
+});

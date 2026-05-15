@@ -8,8 +8,9 @@ self.addEventListener('unhandledrejection', (e) => {
   if (POPUP_GONE_RE.test(text)) e.preventDefault();
 });
 
-import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm, fetchInboxViaTab, fetchMyAdsViaApi } from './orchestrator.js';
-import { processRawAds, markResultsSeen, DEFAULT_KEYWORDS } from './prospect.js';
+import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm, fetchInboxViaTab, fetchMyAdsViaApi, fetchUserCardViaTab } from './orchestrator.js';
+import { processRawAds, markResultsSeen, DEFAULT_KEYWORDS, enrichProspectsWithUserCard } from './prospect.js';
+import { normalizeUserCard } from './my-ads.js';
 import { classifyConversations } from './messaging.js';
 
 const BUMP_ALARM = 'lbc-weekly-bump';
@@ -277,6 +278,12 @@ async function doProspectScan(trigger) {
     shippableOnly: !!profile.shippableOnly,
     sortOrder: profile.sortOrder || 'score'
   });
+  // Opt-in : enrichir top-N résultats avec user-card web. Chaque fetch ouvre
+  // une tab (~3s), limité à enrichTopN pour ne pas thrash DataDome.
+  if (profile.enrichUserCard) {
+    const topN = Math.max(1, Math.min(20, profile.enrichTopN || 10));
+    out.results = await enrichTopResults(out.results, topN);
+  }
   await chrome.storage.local.set({
     prospectResultsByProfile: { ...prospectResultsByProfile, [profile.id]: out.results },
     prospectLastRunByProfile: {
@@ -366,6 +373,36 @@ async function notifyDatadomeBlock(source) {
     contextMessage: 'Leboncoin Bumper',
     priority: 2
   });
+}
+
+// Persisted cache lives in chrome.storage.local.userCardCache. Loaded once,
+// passed in/out of enrichProspectsWithUserCard, saved back after.
+async function enrichTopResults(results, topN) {
+  if (!results?.length) return results;
+  const top = results.slice(0, topN);
+  const rest = results.slice(topN);
+  const { userCardCache = {} } = await chrome.storage.local.get('userCardCache');
+
+  const fetchCard = async (userId) => {
+    const res = await fetchUserCardViaTab(userId);
+    if (res?.datadomeBlocked) { await notifyDatadomeBlock('user-card'); return null; }
+    if (res?.notFound || res?.error || !res?.userData) return null;
+    // Signal diagnostic : 1-3 endpoints sur 4 bloqués sans déclencher la notif
+    // user-facing. Si on commence à voir des partial403 régulièrement, DataDome
+    // durcit sur certaines routes — agir avant que tout casse.
+    const p = res.userData._web_extras?.partial403;
+    if (p > 0) console.warn(`[lbc-bumper] user-card partial DataDome block: ${p}/4 endpoints down`);
+    return normalizeUserCard(res.userData, res.proData);
+  };
+
+  // Re-read cache juste avant le write pour éviter de clobber les ajouts d'un
+  // scan concurrent (alarm + manuel peuvent se croiser).
+  const { entries: enrichedTop, cache: newCache } = await enrichProspectsWithUserCard({
+    entries: top, fetchCard, cache: userCardCache
+  });
+  const { userCardCache: latest = {} } = await chrome.storage.local.get('userCardCache');
+  await chrome.storage.local.set({ userCardCache: { ...latest, ...newCache } });
+  return [...enrichedTop, ...rest];
 }
 
 async function maybeNotify(results, seenBefore, settings, profile, ignored = new Set()) {

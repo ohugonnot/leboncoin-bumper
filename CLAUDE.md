@@ -11,10 +11,19 @@
 - `POST /api/dashboard/v1/search` — **auth Bearer JWT** (`localStorage.luat`), dashboard utilisateur. Pas d'api_key.
 - `GET /messaging/proxy/api/v1/hal/{userId}/conversations` — **auth Bearer JWT**, userId dans cookie `lbc_user_id`. Pagination HAL via `_links.next`.
 
-## Endpoints LBC à éviter / non-fonctionnels
-- `GET /api/user-card/v2/{id}/infos` : **mobile-only**. Depuis browser → "Failed to fetch" même avec api_key (DataDome rejette au niveau TLS, validé live 2026-05-14). La lib `etienne-hd/lbc` y arrive parce qu'elle impersonne un UA mobile + TLS fingerprint mobile via curl_cffi.
-- Le web client LBC ne consomme PAS cet endpoint : il agrège depuis `/api/users/v1/users/{uid}/account-type`, `/api/adfinder/v2/owner_listing`, `/api/followme/v1/followers-number/{uid}`, `/api/profile-picture/v1/users/{uid}/picture`. Pour ré-implémenter un user-card cote web, agréger depuis ces endpoints.
-- Conséquence : `normalizeUserCard`, `mergeUserCardIntoEntry`, `enrichProspectsWithUserCard` (couche pure) sont conservés mais sans consumer cote prod tant qu'aucun fetcher web n'est branché.
+## Endpoints user-card : web-aggregated (4 endpoints, PAS de api_key)
+`fetchUserCardViaTab(uid)` agrège ces 4 endpoints en parallèle (Promise.all) :
+- `GET /api/users/v1/users/{uid}/account-type` → `{accountType: "private-individual"|"pro-..."}`
+- `POST /api/adfinder/v2/owner_listing` body `{filters:{owner:{user_id:uid}}, limit, offset}` → `{total, total_active, ads:[...]}`
+- `GET /api/followme/v1/followers-number/{uid}` → `{count}`
+- `GET /api/profile-picture/v1/users/{uid}/picture` → `{extra_large_url, large_url, ...}`
+
+**Piège majeur** : **AUCUN header `api_key`** sur ces 4 endpoints (contrairement à `/finder/search` et `/classified/{id}` qui l'exigent). Si on l'ajoute, CORS preflight rejette → "Failed to fetch" opaque. Validé live 2026-05-15.
+
+Limitation : le path web n'expose PAS feedback/reply/presence/badges/name/registered_at (mobile-only). Les champs concernés restent `null` après enrichissement.
+
+## Endpoints LBC mobile-only (à éviter depuis browser)
+- `GET /api/user-card/v2/{id}/infos` : mobile-only. Depuis browser → "Failed to fetch" même sans/avec api_key (DataDome TLS-reject avant CORS, validé live 2026-05-14). La lib `etienne-hd/lbc` y arrive via UA + TLS fingerprint mobile via curl_cffi — impossible depuis extension Chrome.
 
 ## Auth — pièges
 - `localStorage.luat` = JWT court. Décodé sans vérif (`my-ads.decodeJwt`) pour extraire `account_id`.

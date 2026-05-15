@@ -21,8 +21,15 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce
 - `prospect.buildSearchPayload` accepte désormais `ownerType`, `shippable`, `priceMin/Max`, `departments`, `adTypes` et émet le payload mimicry officiel.
 - `scrapeEditPage(tabId, adId)` : utilise `/api/adfinder/v1/classified/{id}` avec `api_key` au lieu de DOM-scraper /editer (~3x plus rapide, résiste aux redesigns).
 
-### Retiré
-- `orchestrator.fetchUserCardViaTab` et le wiring `background.enrichTopResults` : validation live 2026-05-14 a montré que `/api/user-card/v2/{id}/infos` est mobile-only — depuis browser, "Failed to fetch" systématique (DataDome TLS-reject). La couche pure (`normalizeUserCard`, `mergeUserCardIntoEntry`, `enrichProspectsWithUserCard`) est conservée et reste réutilisable dès qu'un fetcher web compatible sera branché.
+### Retiré → Ré-ajouté (web-aggregated)
+- `orchestrator.fetchUserCardViaTab` initialement retiré (mobile-only endpoint `/api/user-card/v2/{id}/infos`), maintenant ré-implementé en agrégeant 4 endpoints web (validés live 2026-05-15) :
+  - `GET /api/users/v1/users/{uid}/account-type` → accountType raw
+  - `POST /api/adfinder/v2/owner_listing` (body `{filters:{owner:{user_id}}}`) → total/total_active
+  - `GET /api/followme/v1/followers-number/{uid}` → count
+  - `GET /api/profile-picture/v1/users/{uid}/picture` → small/medium/large/extra_large URLs
+- **Piège crucial** : aucun header `api_key` sur ces 4 endpoints — il déclenche un CORS preflight rejeté → "Failed to fetch". Seul `/finder/search` et `/classified/{id}` exigent `api_key`. Validé live sur les 4.
+- `background.enrichTopResults` ré-activé : opt-in via `profile.enrichUserCard`, top-N (10 par défaut), cache persisté dans `chrome.storage.local.userCardCache`.
+- Limitation honnête : ce path web n'expose PAS `feedback`, `reply`, `presence`, `badges`, `name`, `registered_at` (ces données sont mobile-only). Les champs concernés restent `null` après enrichissement. Disponibles via web : `accountType`, `totalAds`, `profilePicture`, `followers` (nouveau, exposé sous `card.web.followers`).
 
 ### Fix
 - `fetchAdDetailViaTab` + `scrapeEditPage` : ajout du header `api_key: ba0c2dad52b3ec` — sans lui, 403 DataDome systematique sur `/classified/{id}` (constaté en live).

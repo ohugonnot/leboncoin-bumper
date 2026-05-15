@@ -315,7 +315,9 @@ export function mergeUserCardIntoEntry(entry, card) {
     user_is_pro: !!card.isPro,
     user_badges: Array.isArray(card.badges)
       ? card.badges.map(b => b.type).filter(Boolean)
-      : []
+      : [],
+    user_followers: card.web?.followers ?? null,
+    user_profile_picture: card.profilePicture ?? null
   };
 }
 
@@ -366,6 +368,11 @@ export async function enrichProspectsWithUserCard({
     const card = cache[e.owner_id]?.card;
     return card ? mergeUserCardIntoEntry(e, card) : e;
   });
+  // Purge des entrées doublement expirées : évite la croissance non bornée de
+  // chrome.storage.local.userCardCache sur scans répétés (~1KB par seller).
+  for (const uid in cache) {
+    if (now - (cache[uid]?.at || 0) > ttlMs * 2) delete cache[uid];
+  }
   return { entries: enriched, cache };
 }
 
