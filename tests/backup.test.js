@@ -176,7 +176,7 @@ test('fetchAndEncodePhotos: encode thumbnail via fetchFn', async () => {
   const fetchMock = makeFetchMock({
     'https://img.lbc.fr/photo1.jpg': { ok: true, data: 'imgdata', type: 'image/jpeg' }
   });
-  const { listings: out, encoded, total } = await fetchAndEncodePhotos(listings, fetchMock);
+  const { listings: out, encoded, total } = await fetchAndEncodePhotos(listings, fetchMock, undefined, [0, 0]);
   assert.equal(total, 1);
   assert.equal(encoded, 1);
   assert.ok(out[0].thumbnail.startsWith('data:image/jpeg;base64,'), 'thumbnail should be a data URI');
@@ -195,7 +195,7 @@ test('fetchAndEncodePhotos: échec partiel → garde URL originale, pas de crash
     'https://img.lbc.fr/fail.jpg': { ok: false },
     'https://img.lbc.fr/ok2.jpg': { ok: true, data: 'img2', type: 'image/png' }
   });
-  const { listings: out, encoded, total } = await fetchAndEncodePhotos(listings, fetchMock);
+  const { listings: out, encoded, total } = await fetchAndEncodePhotos(listings, fetchMock, undefined, [0, 0]);
   assert.equal(total, 3); // 2 photos + 1 thumbnail
   assert.equal(encoded, 2); // fail.jpg kept as URL
   // fail.jpg stays as original URL string

@@ -7,9 +7,9 @@ import {
   scoreAd, ageDays, buildSearchPayload, buildEntry,
   sortEntries, runProspectScan, formatReplyTemplate,
   parseProfileKeywords, explainScore, groupByOwner, searchKeyword,
-  mergeUserCardIntoEntry, enrichProspectsWithUserCard,
+  mergeUserCardIntoEntry, enrichProspectsWithUserCard, jitter, DATADOME_BLOCKED,
   filterFreshForNotification, buildWebhookPayload, markResultsNotified,
-  buildEmailFromPayload,
+  buildEmailFromPayload, isWithinCooldown,
   STRONG_SIGNALS, MODERATE_SIGNALS, NEG_SIGNALS, DEMAND_PREFIX, DEMAND_HINTS
 } from '../prospect.js';
 import {
@@ -191,7 +191,8 @@ test('runProspectScan: filters by minScore, drops too-old, dedup by id', async (
     keywords: ['wordpress', 'aide site', 'site web', 'développeur'],
     minScore: 5,
     maxAgeDays: 30,
-    fetchFn
+    fetchFn,
+    keywordDelay: [0, 1]  // keep the test fast — pacing itself covered separately
   });
   const ids = out.results.map(r => r.list_id);
   assert.ok(ids.includes('3196483489'), 'WordPress Metz must appear');
@@ -427,7 +428,7 @@ test('groupByOwner: preserves primary order — [A1, B1, A2] → primaries [A1, 
 
 // ─── searchKeyword rate-limiting ──────────────────────────────────────────
 
-test('searchKeyword: inserts ≥250ms delay between paginated pages', async () => {
+test('searchKeyword: inserts a jittered delay between paginated pages (default pacing)', async () => {
   // Simulate 200 ads spread over 2 pages (limit=100 each) with a recent date
   // so the age cutoff doesn't short-circuit after page 1.
   const recentDate = new Date(Date.now() - 86400000).toISOString(); // 1 day ago
@@ -448,8 +449,24 @@ test('searchKeyword: inserts ≥250ms delay between paginated pages', async () =
 
   assert.equal(callCount, 2);
   assert.equal(results.length, 200);
-  // Inter-page sleep is 250ms; allow generous margin for test-runner overhead.
-  assert.ok(elapsed >= 200, `expected ≥200ms inter-page delay, got ${elapsed}ms`);
+  // Default pageDelay is [600, 1600]ms; allow a small margin below the floor
+  // for test-runner scheduling jitter.
+  assert.ok(elapsed >= 550, `expected ≥550ms inter-page delay, got ${elapsed}ms`);
+});
+
+test('searchKeyword: pageDelay override lets callers run pagination fast (test injection)', async () => {
+  const recentDate = new Date(Date.now() - 86400000).toISOString();
+  const makeAd = (id) => ({ ...adWordpressMetz, list_id: id, first_publication_date: recentDate });
+  const page1 = Array.from({ length: 100 }, (_, i) => makeAd(i + 1));
+  const page2 = Array.from({ length: 100 }, (_, i) => makeAd(i + 101));
+  let callCount = 0;
+  const fetchFn = async () => {
+    callCount++;
+    return { ok: true, status: 200, json: async () => ({ ads: callCount === 1 ? page1 : page2, total: 200 }) };
+  };
+  const t0 = Date.now();
+  await searchKeyword('wordpress', { maxAgeDays: 90, fetchFn, pageDelay: [0, 1] });
+  assert.ok(Date.now() - t0 < 500, 'low pageDelay override must keep the call fast');
 });
 
 // ─── mergeUserCardIntoEntry / enrichProspectsWithUserCard ─────────────────
@@ -519,7 +536,7 @@ test('enrichProspectsWithUserCard: fetches only unique owners, populates cache',
   const fetchCard = async (uid) => { calls++; return { ...fullCard, id: uid }; };
 
   const out = await enrichProspectsWithUserCard({
-    entries: [e1, e2, e3], fetchCard
+    entries: [e1, e2, e3], fetchCard, cardDelay: [0, 1]
   });
 
   assert.equal(calls, 2, 'should dedupe by owner_id');
@@ -563,6 +580,19 @@ test('enrichProspectsWithUserCard: fetchCard throws → entry kept without enric
   assert.equal(out.entries[0].user_reply_rate, undefined);
 });
 
+test('enrichProspectsWithUserCard: DATADOME_BLOCKED stops the loop, no more fetches', async () => {
+  const entries = ['u-1', 'u-2', 'u-3', 'u-4'].map((owner_id, i) =>
+    ({ ...baseEntry, list_id: `a${i}`, owner_id }));
+  const seen = [];
+  const fetchCard = async (uid) => { seen.push(uid); return uid === 'u-2' ? DATADOME_BLOCKED : fullCard; };
+
+  const out = await enrichProspectsWithUserCard({ entries, fetchCard, concurrency: 1, cardDelay: [0, 1] });
+
+  assert.deepEqual(seen, ['u-1', 'u-2'], 'stops right after the block, skips u-3/u-4');
+  assert.ok(out.cache['u-1'], 'pre-block result still cached');
+  assert.equal(out.cache['u-2'], undefined, 'sentinel not cached as a card');
+});
+
 test('enrichProspectsWithUserCard: empty entries → noop', async () => {
   const out = await enrichProspectsWithUserCard({ entries: [], fetchCard: async () => fullCard });
   assert.deepEqual(out.entries, []);
@@ -596,6 +626,42 @@ test('enrichProspectsWithUserCard: card partiel (champs null) ne throw pas et me
   assert.equal(out.entries[0].user_total_ads, null);
   assert.equal(out.entries[0].user_reply_rate, null);
   assert.equal(out.entries[0].user_is_pro, false);
+});
+
+test('jitter: reste dans [min, max) sur de nombreux tirages', () => {
+  for (let i = 0; i < 500; i++) {
+    const v = jitter(800, 2000);
+    assert.ok(v >= 800 && v < 2000, `jitter out of bounds: ${v}`);
+  }
+});
+
+test('enrichProspectsWithUserCard: concurrency 1 (défaut) sérialise réellement les fetchCard', async (t) => {
+  t.mock.timers.enable(['setTimeout']);
+  let inFlight = 0, maxInFlight = 0, calls = 0;
+  const fetchCard = async (uid) => {
+    inFlight++;
+    calls++;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise(r => setTimeout(r, 5));
+    inFlight--;
+    return { ...fullCard, id: uid };
+  };
+  const entries = [
+    { ...baseEntry, owner_id: 'u-1' },
+    { ...baseEntry, list_id: 'a2', owner_id: 'u-2' },
+    { ...baseEntry, list_id: 'a3', owner_id: 'u-3' }
+  ];
+  const resultPromise = enrichProspectsWithUserCard({ entries, fetchCard });
+  // Drain fetchCard's own delay + the inter-batch jitter sleep, in lockstep.
+  for (let i = 0; i < 20; i++) {
+    t.mock.timers.tick(3000);
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+  const out = await resultPromise;
+  assert.equal(calls, 3);
+  assert.equal(maxInFlight, 1, 'never more than 1 fetchCard in flight at once');
+  assert.equal(out.entries.length, 3);
 });
 
 test('enrichProspectsWithUserCard: purge des entrées expirées > 2*ttlMs', async () => {
@@ -669,8 +735,10 @@ test('drift: fetchUserCardViaTab utilise les 4 endpoints web (sans api_key)', ()
   // PAS de api_key en tant que header actif (casse le CORS preflight).
   // Tolère les commentaires qui expliquent justement pourquoi.
   assert.ok(!/['"]api_key['"]\s*:/.test(body), 'api_key utilisé comme header — casse le CORS preflight');
-  // Pattern Promise.all pour parallel
-  assert.ok(/Promise\.all\s*\(\[/.test(body), 'endpoints pas appelés en parallèle');
+  // Sérialisé (pas Promise.all) : 4 requêtes simultanées déclenchaient le captcha DataDome
+  assert.ok(!/Promise\.all\s*\(\[/.test(body), 'endpoints ne doivent plus être appelés en parallèle');
+  const fetchOnceCalls = body.match(/await fetchOnce\(/g) || [];
+  assert.equal(fetchOnceCalls.length, 4, 'les 4 endpoints doivent être appelés séquentiellement');
 });
 
 // ─── filterFreshForNotification ───────────────────────────────────────────────
@@ -838,4 +906,31 @@ test('buildEmailFromPayload: champs null → body sans "null" ni "undefined"', (
   // Vérifie qu'aucun champ null/undefined ne s'affiche littéralement
   assert.ok(!/\bnull\b/.test(body), `body ne doit pas contenir "null": ${body}`);
   assert.ok(!/\bundefined\b/.test(body), `body ne doit pas contenir "undefined": ${body}`);
+});
+
+// ─── isWithinCooldown ──────────────────────────────────────────────────────
+
+test('isWithinCooldown: recent block (< window) → true', () => {
+  const now = Date.parse('2026-05-15T10:00:00.000Z');
+  const blockAt = new Date(now - 10 * 60_000).toISOString(); // 10 min ago
+  assert.equal(isWithinCooldown(blockAt, now, 45 * 60_000), true);
+});
+
+test('isWithinCooldown: old block (> window) → false', () => {
+  const now = Date.parse('2026-05-15T10:00:00.000Z');
+  const blockAt = new Date(now - 60 * 60_000).toISOString(); // 1h ago
+  assert.equal(isWithinCooldown(blockAt, now, 45 * 60_000), false);
+});
+
+test('isWithinCooldown: absent/null block → false', () => {
+  const now = Date.now();
+  assert.equal(isWithinCooldown(null, now, 45 * 60_000), false);
+  assert.equal(isWithinCooldown(undefined, now, 45 * 60_000), false);
+});
+
+test('isWithinCooldown: exact boundary (age === windowMs) → false', () => {
+  const now = Date.parse('2026-05-15T10:00:00.000Z');
+  const windowMs = 45 * 60_000;
+  const blockAt = new Date(now - windowMs).toISOString();
+  assert.equal(isWithinCooldown(blockAt, now, windowMs), false);
 });

@@ -9,13 +9,16 @@ self.addEventListener('unhandledrejection', (e) => {
 });
 
 import { runCycle, listUserAds, checkLoginStatus, fetchAdsViaTab, openReplyForm, fetchInboxViaTab, fetchMyAdsViaApi, fetchUserCardViaTab } from './orchestrator.js';
-import { processRawAds, markResultsSeen, markResultsNotified, filterFreshForNotification, buildWebhookPayload, DEFAULT_KEYWORDS, enrichProspectsWithUserCard } from './prospect.js';
+import { processRawAds, markResultsSeen, markResultsNotified, filterFreshForNotification, buildWebhookPayload, DEFAULT_KEYWORDS, enrichProspectsWithUserCard, DATADOME_BLOCKED, isWithinCooldown } from './prospect.js';
 import { normalizeUserCard } from './my-ads.js';
 import { classifyConversations } from './messaging.js';
 import { postNotificationWebhook, postNotificationEmail } from './notify-webhook.js';
 
 const BUMP_ALARM = 'lbc-weekly-bump';
 const PROSPECT_ALARM = 'lbc-weekly-prospect';
+// Retrying automatically right after a DataDome block re-arms the hard block.
+// Manual runs (explicit user intent) bypass this — see chrome.alarms.onAlarm below.
+const COOLDOWN_MS = 45 * 60_000;
 
 chrome.runtime.onInstalled.addListener(async () => {
   const stored = await chrome.storage.local.get(['settings', 'prospectSettings', 'prospectProfiles']);
@@ -82,14 +85,27 @@ async function migrateToProfiles() {
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === BUMP_ALARM) {
     const { settings } = await chrome.storage.local.get('settings');
-    if (settings?.enabled) await runCycle({ trigger: 'alarm' });
+    if (settings?.enabled && !(await skipForCooldown('bump-alarm'))) await runCycle({ trigger: 'alarm' });
     await rescheduleBump();
   } else if (alarm.name === PROSPECT_ALARM) {
     const { prospectGlobalSettings } = await chrome.storage.local.get('prospectGlobalSettings');
-    if (prospectGlobalSettings?.enabled) await doProspectScan('alarm');
+    if (prospectGlobalSettings?.enabled && !(await skipForCooldown('prospect-alarm'))) await doProspectScan('alarm');
     await rescheduleProspect();
   }
 });
+
+// Automatic (alarm) runs only — manual triggers are explicit user intent and
+// must not be gated (see RUN_PROSPECT_NOW / RUN_NOW / REFRESH_LISTINGS / INBOX_REFRESH below).
+async function skipForCooldown(source) {
+  const { datadomeBlock } = await chrome.storage.local.get('datadomeBlock');
+  const now = Date.now();
+  if (!isWithinCooldown(datadomeBlock?.at, now, COOLDOWN_MS)) return false;
+  await chrome.storage.local.set({
+    scanSkipped: { at: new Date(now).toISOString(), reason: 'datadome-cooldown', source }
+  });
+  console.info(`[lbc-bumper] skipping ${source}: within DataDome cooldown (blocked at ${datadomeBlock.at})`);
+  return true;
+}
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   let responded = false;
@@ -418,7 +434,7 @@ async function enrichTopResults(results, topN) {
 
   const fetchCard = async (userId) => {
     const res = await fetchUserCardViaTab(userId);
-    if (res?.datadomeBlocked) { await notifyDatadomeBlock('user-card'); return null; }
+    if (res?.datadomeBlocked) { await notifyDatadomeBlock('user-card'); return DATADOME_BLOCKED; }
     if (res?.notFound || res?.error || !res?.userData) return null;
     // Signal diagnostic : 1-3 endpoints sur 4 bloqués sans déclencher la notif
     // user-facing. Si on commence à voir des partial403 régulièrement, DataDome

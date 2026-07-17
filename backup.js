@@ -75,7 +75,7 @@ export function deserializeBackup(jsonText) {
  * @param {Function} [onProgress]     Called with { done, total } after each photo.
  * @returns {Promise<{ listings: object[], encoded: number, total: number }>}
  */
-export async function fetchAndEncodePhotos(listings, fetchFn = fetch, onProgress) {
+export async function fetchAndEncodePhotos(listings, fetchFn = fetch, onProgress, photoDelay = [150, 500]) {
   const safe = Array.isArray(listings) ? listings : [];
   let done = 0;
 
@@ -94,6 +94,7 @@ export async function fetchAndEncodePhotos(listings, fetchFn = fetch, onProgress
     if (Array.isArray(l.photos) && l.photos.length) {
       const newPhotos = [];
       for (const photo of l.photos) {
+        if (done > 0) await sleep(photoDelay[0] + Math.random() * (photoDelay[1] - photoDelay[0]));
         const url = typeof photo === 'string' ? photo : photo?.url;
         if (url) {
           const dataUri = await _fetchDataUri(url, fetchFn);
@@ -113,6 +114,7 @@ export async function fetchAndEncodePhotos(listings, fetchFn = fetch, onProgress
     }
 
     if (l.thumbnail) {
+      if (done > 0) await sleep(photoDelay[0] + Math.random() * (photoDelay[1] - photoDelay[0]));
       const dataUri = await _fetchDataUri(l.thumbnail, fetchFn);
       if (dataUri) {
         next.thumbnail = dataUri;
@@ -126,6 +128,10 @@ export async function fetchAndEncodePhotos(listings, fetchFn = fetch, onProgress
   }
 
   return { listings: out, encoded, total };
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
 }
 
 async function _fetchDataUri(url, fetchFn) {

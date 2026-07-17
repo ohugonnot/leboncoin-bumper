@@ -224,9 +224,10 @@ export function buildSearchPayload({
  * @param {object} [opts]
  * @param {number} [opts.maxAgeDays=30]
  * @param {Function} [opts.fetchFn=fetch]
+ * @param {[number, number]} [opts.pageDelay=[600, 1600]]  jitter range between pages
  * @returns {Promise<object[]>}  raw leboncoin ad objects
  */
-export async function searchKeyword(keyword, { maxAgeDays = 30, fetchFn = (typeof fetch !== 'undefined' ? fetch : null) } = {}) {
+export async function searchKeyword(keyword, { maxAgeDays = 30, fetchFn = (typeof fetch !== 'undefined' ? fetch : null), pageDelay = [600, 1600] } = {}) {
   if (!fetchFn) throw new Error('No fetch available — pass fetchFn explicitly');
   const items = [];
   let offset = 0;
@@ -249,7 +250,7 @@ export async function searchKeyword(keyword, { maxAgeDays = 30, fetchFn = (typeo
     if (oldestAge !== null && oldestAge > maxAgeDays) break;
     offset += 100;
     if (offset >= (data.total ?? 0)) break;
-    await new Promise(r => setTimeout(r, 250));
+    await sleep(jitter(pageDelay[0], pageDelay[1]));
   }
   return items;
 }
@@ -321,6 +322,20 @@ export function mergeUserCardIntoEntry(entry, card) {
   };
 }
 
+/** Random delay in ms within [min, max). */
+export function jitter(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+// fetchCard returns this when DataDome blocked the request. Signals the enrich
+// loop to stop — retrying more prospects escalates a soft captcha into a hard
+// IP block.
+export const DATADOME_BLOCKED = '__datadome_blocked__';
+
 /**
  * Enrich a list of entries by fetching user-cards in parallel-bounded batches.
  *
@@ -336,7 +351,7 @@ export function mergeUserCardIntoEntry(entry, card) {
  * @param {(uid: string) => Promise<object|null>} opts.fetchCard
  * @param {object} [opts.cache={}]   in/out
  * @param {number} [opts.ttlMs=86400000]  24h
- * @param {number} [opts.concurrency=3]
+ * @param {number} [opts.concurrency=1]
  * @returns {Promise<{entries: object[], cache: object}>}
  */
 export async function enrichProspectsWithUserCard({
@@ -344,7 +359,8 @@ export async function enrichProspectsWithUserCard({
   fetchCard,
   cache = {},
   ttlMs = 86400_000,
-  concurrency = 3
+  concurrency = 1,
+  cardDelay = [800, 2000]
 }) {
   if (!Array.isArray(entries) || !entries.length) return { entries: entries || [], cache };
   const now = Date.now();
@@ -359,9 +375,16 @@ export async function enrichProspectsWithUserCard({
     const results = await Promise.all(batch.map(uid =>
       fetchCard(uid).catch(() => null)
     ));
+    let blocked = false;
     batch.forEach((uid, idx) => {
-      if (results[idx]) cache[uid] = { card: results[idx], at: now };
+      const r = results[idx];
+      if (r === DATADOME_BLOCKED) { blocked = true; return; }
+      if (r) cache[uid] = { card: r, at: now };
     });
+    // Once blocked, stop — extra requests escalate the captcha to a hard block.
+    if (blocked) break;
+    // Space out prospects — avoids the DataDome captcha triggered by bursts.
+    if (i + concurrency < toFetch.length) await sleep(jitter(cardDelay[0], cardDelay[1]));
   }
 
   const enriched = entries.map(e => {
@@ -491,11 +514,13 @@ export async function runProspectScan({
   maxAgeDays = 30,
   minScore = 5,
   seenIds = new Set(),
-  fetchFn
+  fetchFn,
+  keywordDelay = [1200, 3000]
 } = {}) {
   const adsByKeyword = {};
-  for (const kw of keywords) {
-    adsByKeyword[kw] = await searchKeyword(kw, { maxAgeDays, fetchFn });
+  for (let i = 0; i < keywords.length; i++) {
+    adsByKeyword[keywords[i]] = await searchKeyword(keywords[i], { maxAgeDays, fetchFn });
+    if (i < keywords.length - 1) await sleep(jitter(keywordDelay[0], keywordDelay[1]));
   }
   return processRawAds({ adsByKeyword, maxAgeDays, minScore, seenIds });
 }
@@ -631,6 +656,22 @@ export const DEFAULT_REPLY_TEMPLATE = (
   "Cordialement,\n" +
   "Odilon"
 );
+
+/**
+ * True if `blockAtISO` (a DataDome block timestamp) is within `windowMs` of `now`.
+ * Pure — used by background.js to skip automatic runs during the cooldown
+ * (retrying too soon re-arms the hard block).
+ *
+ * @param {string|null|undefined} blockAtISO
+ * @param {number} now       ms epoch
+ * @param {number} windowMs
+ */
+export function isWithinCooldown(blockAtISO, now, windowMs) {
+  if (!blockAtISO) return false;
+  const blockAt = new Date(blockAtISO).getTime();
+  if (isNaN(blockAt)) return false;
+  return now - blockAt < windowMs;
+}
 
 /**
  * Fill placeholders in a reply template using a prospect entry.

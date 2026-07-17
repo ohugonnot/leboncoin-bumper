@@ -9,6 +9,23 @@ const LISTINGS_URL = `${LBC}/compte/part/mes-annonces`;
 const DEPOSIT_URL = `${LBC}/deposer-une-annonce`;
 const DASHBOARD_API = 'https://api.leboncoin.fr/api/dashboard/v1/search';
 
+// Human-pacing config, passed as JSON args into executeScript funcs (those are
+// serialized — no import possible, so the values travel via args instead).
+const PACING = {
+  warmup:       [1500, 3500],   // ms, after tab load, before 1st fetch
+  page:         [600, 1600],    // ms, between pagination pages
+  keyword:      [1200, 3000],   // ms, between prospect-scan keywords
+  card:         [500, 1200],    // ms, between the 4 user-card endpoints
+  photo:        [150, 500],     // ms, between photo CDN fetches
+  longPauseEvery: 20,           // every N requests in a long loop
+  longPause:    [15000, 35000], // ms, "human stepped away" pause
+  backoffBase:  1000,           // ms, full-jitter backoff base on 5xx
+  backoffCap:   30000,
+  maxRetries:   2               // retries on 5xx/network before giving up
+};
+
+function rand(min, max) { return min + Math.random() * (max - min); }
+
 export async function runCycle({ trigger }) {
   const { settings } = await chrome.storage.local.get('settings');
   const skipDelete = settings.skipDeleteForTest === true;
@@ -182,6 +199,7 @@ export async function listUserAds() {
   const tab = await chrome.tabs.create({ url: LISTINGS_URL, active: false });
   try {
     await waitForTabLoad(tab.id);
+    await sleep(rand(PACING.warmup[0], PACING.warmup[1]));
     const { listings, pseudo } = await scrapeListings(tab.id);
     return { listings, pseudo, fetchedAt: new Date().toISOString() };
   } finally {
@@ -201,10 +219,13 @@ export async function fetchMyAdsViaApi() {
   const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
   try {
     await waitForTabLoad(tab.id);
+    await sleep(rand(PACING.warmup[0], PACING.warmup[1]));
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      args: [DASHBOARD_API],
-      func: async (apiUrl) => {
+      args: [DASHBOARD_API, PACING],
+      func: async (apiUrl, pacing) => {
+        const jit = (a) => a[0] + Math.random() * (a[1] - a[0]);
+        const jitBackoff = (attempt) => Math.random() * Math.min(pacing.backoffCap, pacing.backoffBase * 2 ** attempt);
         const jwt = localStorage.getItem('luat');
         if (!jwt) throw new Error('luat absent du localStorage — utilisateur non connecté');
 
@@ -238,21 +259,21 @@ export async function fetchMyAdsViaApi() {
             include_inactive: true,
             include_draft: true
           });
-          // Retry+timeout pattern, mirror of fetchAdsViaTab.
+          // Retry+timeout pattern, mirror of fetchAdsViaTab. Full-jitter backoff on 5xx.
           let res, attempt = 0;
-          const backoffs = [400, 1200];
+          const maxRetries = pacing.maxRetries;
           while (true) {
             const ac = new AbortController();
             const tid = setTimeout(() => ac.abort(), 15000);
             try {
               res = await fetch(apiUrl, { method: 'POST', headers, body, signal: ac.signal });
-              if (res.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
+              if (res.status < 500 || attempt >= maxRetries) { clearTimeout(tid); break; }
             } catch (e) {
               clearTimeout(tid);
-              if (attempt >= backoffs.length) throw e;
+              if (attempt >= maxRetries) throw e;
             }
             clearTimeout(tid);
-            await new Promise(r => setTimeout(r, backoffs[attempt++]));
+            await new Promise(r => setTimeout(r, jitBackoff(attempt++)));
           }
           if (res.status === 403) { datadomeBlocked = true; break; }
           if (!res.ok) throw new Error(`dashboard API returned ${res.status}`);
@@ -260,7 +281,7 @@ export async function fetchMyAdsViaApi() {
           if (total === null) total = data.total ?? 0;
           allAds = allAds.concat(data.ads ?? []);
           offset += limit;
-          if (offset < total) await new Promise(r => setTimeout(r, 250));
+          if (offset < total) await new Promise(r => setTimeout(r, jit(pacing.page)));
         } while (offset < total);
 
         // Pseudo from the owner name on the first ad (consistent across ads).
@@ -310,15 +331,25 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
   const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
   try {
     await waitForTabLoad(tab.id);
+    await sleep(rand(PACING.warmup[0], PACING.warmup[1]));
     const adTypes = adType === 'both' ? ['demand', 'offer'] : [adType];
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      args: [keywords, maxAgeDays, adTypes, apiFilters],
-      func: async (kws, maxAge, adTypesEnum, extra) => {
+      args: [keywords, maxAgeDays, adTypes, apiFilters, PACING],
+      func: async (kws, maxAge, adTypesEnum, extra, pacing) => {
         // Serialized into the tab context — cannot import from prospect.js.
         // Same public key visible in every browser request to LBC.
         const API_URL = 'https://api.leboncoin.fr/finder/search';
         const API_KEY = 'ba0c2dad52b3ec';
+        const jit = (a) => a[0] + Math.random() * (a[1] - a[0]);
+        const jitBackoff = (attempt) => Math.random() * Math.min(pacing.backoffCap, pacing.backoffBase * 2 ** attempt);
+        let reqCount = 0;
+        const maybeLongPause = async () => {
+          reqCount++;
+          if (reqCount % pacing.longPauseEvery === 0) {
+            await new Promise(r => setTimeout(r, jit(pacing.longPause)));
+          }
+        };
         const ageDays = (iso) => {
           if (!iso) return null;
           const d = new Date(String(iso).replace(' ', 'T'));
@@ -397,11 +428,11 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
                 body.owner_type = extra.ownerType;
               }
               // Retry on 5xx / network errors / timeout. DataDome 403 and 4xx
-              // are permanent — no point retrying. Backoff: 400ms then 1200ms.
+              // are permanent — no point retrying. Full-jitter backoff.
               // Timeout per attempt: 15s (AbortController). Without this,
               // hung connections would block the whole keyword loop.
               let res, attempt = 0;
-              const backoffs = [400, 1200];
+              const maxRetries = pacing.maxRetries;
               while (true) {
                 const ac = new AbortController();
                 const tid = setTimeout(() => ac.abort(), 15000);
@@ -413,12 +444,12 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
                     body: JSON.stringify(body),
                     signal: ac.signal
                   });
-                  if (res.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
+                  if (res.status < 500 || attempt >= maxRetries) { clearTimeout(tid); break; }
                 } catch {
-                  if (attempt >= backoffs.length) { res = null; clearTimeout(tid); break; }
+                  if (attempt >= maxRetries) { res = null; clearTimeout(tid); break; }
                 }
                 clearTimeout(tid);
-                await new Promise(r => setTimeout(r, backoffs[attempt++]));
+                await new Promise(r => setTimeout(r, jitBackoff(attempt++)));
               }
               if (!res) break;
               // 403 = DataDome captcha. The tab itself has bypassed it once
@@ -431,6 +462,7 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
               }
               if (!res.ok) break;
               data = await res.json();
+              await maybeLongPause();
             } catch { break; }
             const ads = data?.ads ?? [];
             if (!ads.length) break;
@@ -439,10 +471,13 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
             if (oldest !== null && oldest > maxAge) break;
             offset += 100;
             if (offset >= (data.total ?? 0)) break;
-            await new Promise(r => setTimeout(r, 250));
+            await new Promise(r => setTimeout(r, jit(pacing.page)));
           }
           adsByKeyword[kw] = items;
           if (datadomeBlocked) break;
+          if (i < kws.length - 1) {
+            await new Promise(r => setTimeout(r, jit(pacing.keyword)));
+          }
         }
         await chrome.storage.local.remove('prospectScanProgress');
         return { adsByKeyword, contactedAdIds, datadomeBlocked };
@@ -471,9 +506,13 @@ export async function fetchInboxViaTab() {
   const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
   try {
     await waitForTabLoad(tab.id);
+    await sleep(rand(PACING.warmup[0], PACING.warmup[1]));
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: async () => {
+      args: [PACING],
+      func: async (pacing) => {
+        const jit = (a) => a[0] + Math.random() * (a[1] - a[0]);
+        const jitBackoff = (attempt) => Math.random() * Math.min(pacing.backoffCap, pacing.backoffBase * 2 ** attempt);
         const jwt = localStorage.getItem('luat');
         const userIdCookie = document.cookie.split(';').map(s => s.trim())
           .find(s => s.startsWith('lbc_user_id='));
@@ -490,33 +529,36 @@ export async function fetchInboxViaTab() {
         let datadomeBlocked = false;
 
         while (nextUrl && pages < MAX_PAGES) {
-          // Retry+timeout, mirror of fetchAdsViaTab.
+          // Retry+timeout, mirror of fetchAdsViaTab. Full-jitter backoff.
           let r, attempt = 0;
-          const backoffs = [400, 1200];
+          const maxRetries = pacing.maxRetries;
           while (true) {
             const ac = new AbortController();
             const tid = setTimeout(() => ac.abort(), 15000);
             try {
               r = await fetch(nextUrl, { headers, credentials: 'include', signal: ac.signal });
-              if (r.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
+              if (r.status < 500 || attempt >= maxRetries) { clearTimeout(tid); break; }
             } catch (e) {
               clearTimeout(tid);
-              if (attempt >= backoffs.length) throw e;
+              if (attempt >= maxRetries) throw e;
             }
             clearTimeout(tid);
-            await new Promise(res => setTimeout(res, backoffs[attempt++]));
+            await new Promise(res => setTimeout(res, jitBackoff(attempt++)));
           }
           if (r.status === 403) { datadomeBlocked = true; break; }
           if (!r.ok) throw new Error(`Inbox API returned ${r.status}`);
           const d = await r.json();
           allConversations.push(...(d?._embedded?.conversations || []));
           pages++;
+          if (pages % pacing.longPauseEvery === 0) {
+            await new Promise(r => setTimeout(r, jit(pacing.longPause)));
+          }
           // _links.next is null or absent on the last page
           const rawNext = d?._links?.next?.href ?? null;
           if (!rawNext) break;
           // Prefix relative paths (e.g. /messaging/proxy/...?continuationToken=...)
           nextUrl = rawNext.startsWith('http') ? rawNext : BASE + rawNext;
-          if (pages < MAX_PAGES) await new Promise(r => setTimeout(r, 250));
+          if (pages < MAX_PAGES) await new Promise(r => setTimeout(r, jit(pacing.page)));
         }
 
         return { conversations: allConversations, datadomeBlocked };
@@ -545,13 +587,15 @@ export async function fetchAdDetailViaTab(adId) {
   const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
   try {
     await waitForTabLoad(tab.id);
+    await sleep(rand(PACING.warmup[0], PACING.warmup[1]));
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      args: [String(adId)],
-      func: async (id) => {
+      args: [String(adId), PACING],
+      func: async (id, pacing) => {
+        const jitBackoff = (attempt) => Math.random() * Math.min(pacing.backoffCap, pacing.backoffBase * 2 ** attempt);
         const url = `https://api.leboncoin.fr/api/adfinder/v1/classified/${id}`;
         let r, attempt = 0;
-        const backoffs = [400, 1200];
+        const maxRetries = pacing.maxRetries;
         while (true) {
           const ac = new AbortController();
           const tid = setTimeout(() => ac.abort(), 15000);
@@ -563,13 +607,13 @@ export async function fetchAdDetailViaTab(adId) {
               headers: { 'api_key': 'ba0c2dad52b3ec' },
               signal: ac.signal
             });
-            if (r.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
+            if (r.status < 500 || attempt >= maxRetries) { clearTimeout(tid); break; }
           } catch (e) {
             clearTimeout(tid);
-            if (attempt >= backoffs.length) return { error: String(e?.message || e) };
+            if (attempt >= maxRetries) return { error: String(e?.message || e) };
           }
           clearTimeout(tid);
-          await new Promise(res => setTimeout(res, backoffs[attempt++]));
+          await new Promise(res => setTimeout(res, jitBackoff(attempt++)));
         }
         if (r.status === 403) return { datadomeBlocked: true };
         if (r.status === 404 || r.status === 410) return { notFound: true };
@@ -604,26 +648,29 @@ export async function fetchUserCardViaTab(userId) {
   const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
   try {
     await waitForTabLoad(tab.id);
+    await sleep(rand(PACING.warmup[0], PACING.warmup[1]));
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      args: [String(userId)],
-      func: async (uid) => {
+      args: [String(userId), PACING],
+      func: async (uid, pacing) => {
+        const jit = (a) => a[0] + Math.random() * (a[1] - a[0]);
+        const jitBackoff = (attempt) => Math.random() * Math.min(pacing.backoffCap, pacing.backoffBase * 2 ** attempt);
         // PAS de header api_key — il casse CORS preflight sur ces endpoints.
         const fetchOnce = async (url, init = {}) => {
           let r, attempt = 0;
-          const backoffs = [400, 1200];
+          const maxRetries = pacing.maxRetries;
           while (true) {
             const ac = new AbortController();
             const tid = setTimeout(() => ac.abort(), 15000);
             try {
               r = await fetch(url, { credentials: 'include', ...init, signal: ac.signal });
-              if (r.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
+              if (r.status < 500 || attempt >= maxRetries) { clearTimeout(tid); break; }
             } catch (e) {
               clearTimeout(tid);
-              if (attempt >= backoffs.length) return { error: String(e?.message || e) };
+              if (attempt >= maxRetries) return { error: String(e?.message || e) };
             }
             clearTimeout(tid);
-            await new Promise(res => setTimeout(res, backoffs[attempt++]));
+            await new Promise(res => setTimeout(res, jitBackoff(attempt++)));
           }
           if (r.status === 403) return { datadomeBlocked: true };
           if (r.status === 404 || r.status === 410) return { notFound: true };
@@ -632,16 +679,19 @@ export async function fetchUserCardViaTab(userId) {
           catch (e) { return { error: String(e?.message || e) }; }
         };
 
-        const [acct, ownerList, followers, pic] = await Promise.all([
-          fetchOnce(`https://api.leboncoin.fr/api/users/v1/users/${uid}/account-type`),
-          fetchOnce(`https://api.leboncoin.fr/api/adfinder/v2/owner_listing`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ filters: { owner: { user_id: uid } }, limit: 1, offset: 0 })
-          }),
-          fetchOnce(`https://api.leboncoin.fr/api/followme/v1/followers-number/${uid}`),
-          fetchOnce(`https://api.leboncoin.fr/api/profile-picture/v1/users/${uid}/picture`)
-        ]);
+        // Sequential, not Promise.all: 4 simultaneous requests per prospect,
+        // repeated across prospects, is what triggers the DataDome captcha.
+        const acct = await fetchOnce(`https://api.leboncoin.fr/api/users/v1/users/${uid}/account-type`);
+        await new Promise(r => setTimeout(r, jit(pacing.card)));
+        const ownerList = await fetchOnce(`https://api.leboncoin.fr/api/adfinder/v2/owner_listing`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ filters: { owner: { user_id: uid } }, limit: 1, offset: 0 })
+        });
+        await new Promise(r => setTimeout(r, jit(pacing.card)));
+        const followers = await fetchOnce(`https://api.leboncoin.fr/api/followme/v1/followers-number/${uid}`);
+        await new Promise(r => setTimeout(r, jit(pacing.card)));
+        const pic = await fetchOnce(`https://api.leboncoin.fr/api/profile-picture/v1/users/${uid}/picture`);
 
         const partial403 = [acct, ownerList, followers, pic].filter(s => s.datadomeBlocked).length;
         // Tous bloqués → propagate au caller pour notif user.
@@ -725,11 +775,12 @@ export async function openReplyForm(adId, message) {
 async function scrapeEditPage(tabId, adId) {
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId },
-    args: [String(adId)],
-    func: async (id) => {
+    args: [String(adId), PACING],
+    func: async (id, pacing) => {
+      const jitBackoff = (attempt) => Math.random() * Math.min(pacing.backoffCap, pacing.backoffBase * 2 ** attempt);
       const url = `https://api.leboncoin.fr/api/adfinder/v1/classified/${id}`;
       let r, attempt = 0;
-      const backoffs = [400, 1200];
+      const maxRetries = pacing.maxRetries;
       while (true) {
         const ac = new AbortController();
         const tid = setTimeout(() => ac.abort(), 15000);
@@ -740,13 +791,13 @@ async function scrapeEditPage(tabId, adId) {
             headers: { 'api_key': 'ba0c2dad52b3ec' },
             signal: ac.signal
           });
-          if (r.status < 500 || attempt >= backoffs.length) { clearTimeout(tid); break; }
+          if (r.status < 500 || attempt >= maxRetries) { clearTimeout(tid); break; }
         } catch (e) {
           clearTimeout(tid);
-          if (attempt >= backoffs.length) return { error: String(e?.message || e) };
+          if (attempt >= maxRetries) return { error: String(e?.message || e) };
         }
         clearTimeout(tid);
-        await new Promise(res => setTimeout(res, backoffs[attempt++]));
+        await new Promise(res => setTimeout(res, jitBackoff(attempt++)));
       }
       if (r.status === 403) return { error: 'datadome blocked' };
       if (r.status === 404 || r.status === 410) return { error: 'ad not found (deleted)' };
@@ -1186,6 +1237,7 @@ async function uploadPhotos(tabId, photoUrls) {
   if (!photoUrls?.length) return;
   const payload = [];
   for (const url of photoUrls) {
+    if (payload.length) await sleep(rand(PACING.photo[0], PACING.photo[1]));
     let resp;
     try {
       resp = await fetch(url);
