@@ -1,3 +1,5 @@
+import { PACING, sleep } from './pacing.js';
+
 const BACKUP_VERSION = 1;
 const EXTENSION_ID = 'leboncoin-bumper';
 
@@ -75,7 +77,7 @@ export function deserializeBackup(jsonText) {
  * @param {Function} [onProgress]     Called with { done, total } after each photo.
  * @returns {Promise<{ listings: object[], encoded: number, total: number }>}
  */
-export async function fetchAndEncodePhotos(listings, fetchFn = fetch, onProgress, photoDelay = [150, 500]) {
+export async function fetchAndEncodePhotos(listings, fetchFn = fetch, onProgress, photoDelay = PACING.photo) {
   const safe = Array.isArray(listings) ? listings : [];
   let done = 0;
 
@@ -128,10 +130,6 @@ export async function fetchAndEncodePhotos(listings, fetchFn = fetch, onProgress
   }
 
   return { listings: out, encoded, total };
-}
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
 }
 
 async function _fetchDataUri(url, fetchFn) {

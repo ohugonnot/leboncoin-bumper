@@ -3,28 +3,16 @@
 // after a step has been submitted. Going back and re-submitting creates a duplicate listing.
 
 import { normalizeAd } from './my-ads.js';
+import { PACING, jitter, sleep } from './pacing.js';
 
 const LBC = 'https://www.leboncoin.fr';
 const LISTINGS_URL = `${LBC}/compte/part/mes-annonces`;
 const DEPOSIT_URL = `${LBC}/deposer-une-annonce`;
 const DASHBOARD_API = 'https://api.leboncoin.fr/api/dashboard/v1/search';
 
-// Human-pacing config, passed as JSON args into executeScript funcs (those are
-// serialized — no import possible, so the values travel via args instead).
-const PACING = {
-  warmup:       [1500, 3500],   // ms, after tab load, before 1st fetch
-  page:         [600, 1600],    // ms, between pagination pages
-  keyword:      [1200, 3000],   // ms, between prospect-scan keywords
-  card:         [500, 1200],    // ms, between the 4 user-card endpoints
-  photo:        [150, 500],     // ms, between photo CDN fetches
-  longPauseEvery: 20,           // every N requests in a long loop
-  longPause:    [15000, 35000], // ms, "human stepped away" pause
-  backoffBase:  1000,           // ms, full-jitter backoff base on 5xx
-  backoffCap:   30000,
-  maxRetries:   2               // retries on 5xx/network before giving up
-};
-
-function rand(min, max) { return min + Math.random() * (max - min); }
+// Human-like pause after a tab loads, before the first API fetch — lets the
+// DataDome sensor validate the session cookie first.
+const warmup = () => sleep(jitter(PACING.warmup[0], PACING.warmup[1]));
 
 export async function runCycle({ trigger }) {
   const { settings } = await chrome.storage.local.get('settings');
@@ -199,7 +187,7 @@ export async function listUserAds() {
   const tab = await chrome.tabs.create({ url: LISTINGS_URL, active: false });
   try {
     await waitForTabLoad(tab.id);
-    await sleep(rand(PACING.warmup[0], PACING.warmup[1]));
+    await warmup();
     const { listings, pseudo } = await scrapeListings(tab.id);
     return { listings, pseudo, fetchedAt: new Date().toISOString() };
   } finally {
@@ -219,7 +207,7 @@ export async function fetchMyAdsViaApi() {
   const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
   try {
     await waitForTabLoad(tab.id);
-    await sleep(rand(PACING.warmup[0], PACING.warmup[1]));
+    await warmup();
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       args: [DASHBOARD_API, PACING],
@@ -331,7 +319,7 @@ export async function fetchAdsViaTab(keywords, maxAgeDays = 30, adType = 'demand
   const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
   try {
     await waitForTabLoad(tab.id);
-    await sleep(rand(PACING.warmup[0], PACING.warmup[1]));
+    await warmup();
     const adTypes = adType === 'both' ? ['demand', 'offer'] : [adType];
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -506,7 +494,7 @@ export async function fetchInboxViaTab() {
   const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
   try {
     await waitForTabLoad(tab.id);
-    await sleep(rand(PACING.warmup[0], PACING.warmup[1]));
+    await warmup();
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       args: [PACING],
@@ -587,7 +575,7 @@ export async function fetchAdDetailViaTab(adId) {
   const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
   try {
     await waitForTabLoad(tab.id);
-    await sleep(rand(PACING.warmup[0], PACING.warmup[1]));
+    await warmup();
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       args: [String(adId), PACING],
@@ -648,7 +636,7 @@ export async function fetchUserCardViaTab(userId) {
   const tab = await chrome.tabs.create({ url: LBC + '/', active: false });
   try {
     await waitForTabLoad(tab.id);
-    await sleep(rand(PACING.warmup[0], PACING.warmup[1]));
+    await warmup();
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       args: [String(userId), PACING],
@@ -1237,7 +1225,7 @@ async function uploadPhotos(tabId, photoUrls) {
   if (!photoUrls?.length) return;
   const payload = [];
   for (const url of photoUrls) {
-    if (payload.length) await sleep(rand(PACING.photo[0], PACING.photo[1]));
+    if (payload.length) await sleep(jitter(PACING.photo[0], PACING.photo[1]));
     let resp;
     try {
       resp = await fetch(url);
@@ -1325,6 +1313,7 @@ async function waitForSelector(tabId, selector, timeoutMs = 10000) {
       func: (sel) => !!document.querySelector(sel)
     });
     if (result) return;
+    // Local DOM poll, not an LBC network call — no DataDome pacing needed.
     await sleep(250);
   }
   throw new Error('selector timeout: ' + selector);
@@ -1338,6 +1327,7 @@ async function waitForText(tabId, text, timeoutMs = 10000) {
       func: (t) => document.body.textContent.includes(t)
     });
     if (result) return;
+    // Local DOM poll, not an LBC network call — no DataDome pacing needed.
     await sleep(300);
   }
   throw new Error('text timeout: ' + text);
@@ -1351,6 +1341,7 @@ async function waitForUrl(tabId, regex, timeoutMs = 15000) {
       await sleep(800);
       return;
     }
+    // Local DOM poll, not an LBC network call — no DataDome pacing needed.
     await sleep(250);
   }
   throw new Error('url timeout: ' + regex);
@@ -1384,10 +1375,6 @@ async function clickContinue(tabId) {
       btn.click();
     }
   });
-}
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
 }
 
 async function log(message) {

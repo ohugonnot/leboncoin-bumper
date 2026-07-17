@@ -2,6 +2,8 @@
 // inside a leboncoin tab (see orchestrator.fetchAdsViaTab) — the helpers here
 // stay pure so Node tests can exercise them, with one tab-side duplicate of
 // searchKeyword that must be kept in sync.
+import { jitter, sleep, PACING } from './pacing.js';
+
 const API_URL = 'https://api.leboncoin.fr/finder/search';
 // Public web-client API key, visible in every browser request to LBC.
 const API_KEY = 'ba0c2dad52b3ec';
@@ -224,10 +226,10 @@ export function buildSearchPayload({
  * @param {object} [opts]
  * @param {number} [opts.maxAgeDays=30]
  * @param {Function} [opts.fetchFn=fetch]
- * @param {[number, number]} [opts.pageDelay=[600, 1600]]  jitter range between pages
+ * @param {[number, number]} [opts.pageDelay=PACING.page]  jitter range between pages
  * @returns {Promise<object[]>}  raw leboncoin ad objects
  */
-export async function searchKeyword(keyword, { maxAgeDays = 30, fetchFn = (typeof fetch !== 'undefined' ? fetch : null), pageDelay = [600, 1600] } = {}) {
+export async function searchKeyword(keyword, { maxAgeDays = 30, fetchFn = (typeof fetch !== 'undefined' ? fetch : null), pageDelay = PACING.page } = {}) {
   if (!fetchFn) throw new Error('No fetch available — pass fetchFn explicitly');
   const items = [];
   let offset = 0;
@@ -322,19 +324,14 @@ export function mergeUserCardIntoEntry(entry, card) {
   };
 }
 
-/** Random delay in ms within [min, max). */
-export function jitter(min, max) {
-  return min + Math.random() * (max - min);
-}
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
+// Re-exported for tests, which import jitter from this module.
+export { jitter };
 
 // fetchCard returns this when DataDome blocked the request. Signals the enrich
 // loop to stop — retrying more prospects escalates a soft captcha into a hard
-// IP block.
-export const DATADOME_BLOCKED = '__datadome_blocked__';
+// IP block. Symbol, not a string: never serialized/stored, only compared by
+// `===` within the same module realm — safe.
+export const DATADOME_BLOCKED = Symbol('datadome-blocked');
 
 /**
  * Enrich a list of entries by fetching user-cards in parallel-bounded batches.
@@ -515,7 +512,7 @@ export async function runProspectScan({
   minScore = 5,
   seenIds = new Set(),
   fetchFn,
-  keywordDelay = [1200, 3000]
+  keywordDelay = PACING.keyword
 } = {}) {
   const adsByKeyword = {};
   for (let i = 0; i < keywords.length; i++) {

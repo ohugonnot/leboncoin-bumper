@@ -85,18 +85,18 @@ async function migrateToProfiles() {
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === BUMP_ALARM) {
     const { settings } = await chrome.storage.local.get('settings');
-    if (settings?.enabled && !(await skipForCooldown('bump-alarm'))) await runCycle({ trigger: 'alarm' });
+    if (settings?.enabled && !(await shouldSkipForCooldown('bump-alarm'))) await runCycle({ trigger: 'alarm' });
     await rescheduleBump();
   } else if (alarm.name === PROSPECT_ALARM) {
     const { prospectGlobalSettings } = await chrome.storage.local.get('prospectGlobalSettings');
-    if (prospectGlobalSettings?.enabled && !(await skipForCooldown('prospect-alarm'))) await doProspectScan('alarm');
+    if (prospectGlobalSettings?.enabled && !(await shouldSkipForCooldown('prospect-alarm'))) await doProspectScan('alarm');
     await rescheduleProspect();
   }
 });
 
 // Automatic (alarm) runs only — manual triggers are explicit user intent and
 // must not be gated (see RUN_PROSPECT_NOW / RUN_NOW / REFRESH_LISTINGS / INBOX_REFRESH below).
-async function skipForCooldown(source) {
+async function shouldSkipForCooldown(source) {
   const { datadomeBlock } = await chrome.storage.local.get('datadomeBlock');
   const now = Date.now();
   if (!isWithinCooldown(datadomeBlock?.at, now, COOLDOWN_MS)) return false;
@@ -407,7 +407,8 @@ async function notifyDatadomeBlock(source) {
   const now = Date.now();
   const { datadomeBlock } = await chrome.storage.local.get('datadomeBlock');
   await chrome.storage.local.set({
-    datadomeBlock: { at: new Date(now).toISOString(), source }
+    // Preserve notifiedAt — overwriting it here breaks the "1 notif/hour" throttle below.
+    datadomeBlock: { at: new Date(now).toISOString(), source, notifiedAt: datadomeBlock?.notifiedAt }
   });
   const lastNotifAt = datadomeBlock?.notifiedAt ? new Date(datadomeBlock.notifiedAt).getTime() : 0;
   if (now - lastNotifAt < 3600_000) return;
